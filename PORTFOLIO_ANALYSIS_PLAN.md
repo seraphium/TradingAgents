@@ -34,12 +34,12 @@ Suggested locations:
 
 ## Phase 2: Portfolio Input Parsing
 
-- [ ] Add CSV input parsing for portfolio positions.
-- [ ] Add JSON input parsing for portfolio positions.
-- [ ] Normalize ticker symbols using existing ticker handling patterns.
-- [ ] Support option contract fields such as underlying, expiry, strike, right, and contract symbol.
-- [ ] Support cash as an explicit portfolio component.
-- [ ] Add parser tests for valid and invalid portfolio files.
+- [x] Add CSV input parsing for portfolio positions.
+- [x] Add JSON input parsing for portfolio positions.
+- [x] Normalize ticker symbols using existing ticker handling patterns.
+- [x] Support option contract fields such as underlying, expiry, strike, right, and contract symbol.
+- [x] Support cash as an explicit portfolio component.
+- [x] Add parser tests for valid and invalid portfolio files.
 
 Suggested locations:
 
@@ -236,7 +236,7 @@ Suggested test files:
 ## Implementation Order
 
 - [x] Add portfolio schemas and validation.
-- [ ] Add CSV and JSON portfolio input parsing.
+- [x] Add CSV and JSON portfolio input parsing.
 - [ ] Add `propagate_portfolio()` that runs existing single-symbol analysis per holding.
 - [ ] Add deterministic portfolio analytics.
 - [ ] Add structured portfolio recommendation schema and renderer.
@@ -264,3 +264,4 @@ Use this section to record implementation milestones, decisions, and test result
 | 2026-05-27 | Created | Initial portfolio analysis enhancement plan added. |
 | 2026-05-27 | Phase 1 in progress | Added `tradingagents/portfolio` schemas and `tests/test_portfolio_models.py`. Attempted `pytest tests/test_portfolio_models.py`, but external process startup failed with `windows sandbox: spawn setup refresh`; verification is still pending. |
 | 2026-05-27 | Phase 1 verified | Installed `pytest` in the existing `tradingagents` Conda environment and verified `conda run -n tradingagents python -m pytest tests\test_portfolio_models.py`: 14 passed. |
+| 2026-05-27 | Phase 2 verified | Added CSV/JSON parsers in `tradingagents/portfolio/io.py`, exports, and `tests/test_portfolio_io.py`. Verified `conda run -n tradingagents python -m pytest tests\test_portfolio_models.py tests\test_portfolio_io.py`: 24 passed. |
