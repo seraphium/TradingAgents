@@ -25,6 +25,11 @@ from tradingagents.agents.utils.agent_states import (
     RiskDebateState,
 )
 from tradingagents.dataflows.config import set_config
+from tradingagents.portfolio.schemas import (
+    AssetType,
+    PortfolioPosition,
+    PortfolioRequest,
+)
 
 # Import the new abstract tool methods from agent_utils
 from tradingagents.agents.utils.agent_utils import (
@@ -332,6 +337,180 @@ class TradingAgentsGraph:
                 self._checkpointer_ctx.__exit__(None, None, None)
                 self._checkpointer_ctx = None
                 self.graph = self.workflow.compile()
+
+    def propagate_portfolio(self, portfolio_request: PortfolioRequest) -> Dict[str, Any]:
+        """Run single-instrument analysis for the analyzable portfolio holdings.
+
+        This is intentionally an orchestration wrapper around ``propagate`` so
+        existing single-ticker behavior remains unchanged. Stock holdings are
+        analyzed directly. Option holdings reuse the existing stock pipeline for
+        the underlying until dedicated option-chain support is added. Cash
+        holdings are carried through as explicit skipped components.
+        """
+        trade_date = str(portfolio_request.trade_date)
+        analysis_cache: Dict[Tuple[str, str], Dict[str, Any]] = {}
+        holdings: List[Dict[str, Any]] = []
+
+        for position in portfolio_request.positions:
+            instrument = position.instrument
+
+            if instrument.asset_type == AssetType.CASH:
+                holdings.append(
+                    self._portfolio_skipped_holding(
+                        position,
+                        reason="cash positions do not require single-instrument analysis",
+                    )
+                )
+                continue
+
+            if instrument.asset_type == AssetType.STOCK:
+                analysis = self._portfolio_analysis_for_symbol(
+                    instrument.symbol,
+                    trade_date,
+                    "stock",
+                    analysis_cache,
+                )
+                holdings.append(
+                    self._portfolio_analyzed_holding(
+                        position,
+                        analysis_status="analyzed",
+                        analysis=analysis,
+                    )
+                )
+                continue
+
+            if instrument.asset_type == AssetType.OPTION:
+                underlying_analysis = self._portfolio_analysis_for_symbol(
+                    instrument.underlying,
+                    trade_date,
+                    "stock",
+                    analysis_cache,
+                )
+                holdings.append(
+                    self._portfolio_analyzed_holding(
+                        position,
+                        analysis_status="underlying_analyzed",
+                        analysis=underlying_analysis,
+                        extra={
+                            "underlying_symbol": instrument.underlying,
+                            "contract_analysis": None,
+                            "contract_analysis_status": "pending_options_data_support",
+                        },
+                    )
+                )
+                continue
+
+            holdings.append(
+                self._portfolio_skipped_holding(
+                    position,
+                    reason=f"unsupported asset type: {instrument.asset_type}",
+                )
+            )
+
+        return {
+            "portfolio_request": portfolio_request,
+            "trade_date": trade_date,
+            "base_currency": portfolio_request.base_currency,
+            "holdings": holdings,
+            "analyses_by_symbol": {
+                symbol: analysis
+                for (symbol, _asset_type), analysis in analysis_cache.items()
+            },
+        }
+
+    def _portfolio_analysis_for_symbol(
+        self,
+        symbol: str,
+        trade_date: str,
+        asset_type: str,
+        analysis_cache: Dict[Tuple[str, str], Dict[str, Any]],
+    ) -> Dict[str, Any]:
+        cache_key = (symbol, asset_type)
+        if cache_key not in analysis_cache:
+            final_state, signal = self.propagate(
+                symbol,
+                trade_date,
+                asset_type=asset_type,
+            )
+            analysis_cache[cache_key] = self._portfolio_analysis_record(
+                symbol,
+                asset_type,
+                final_state,
+                signal,
+            )
+        return analysis_cache[cache_key]
+
+    def _portfolio_analysis_record(
+        self,
+        symbol: str,
+        asset_type: str,
+        final_state: Dict[str, Any],
+        signal: str,
+    ) -> Dict[str, Any]:
+        return {
+            "symbol": symbol,
+            "asset_type": asset_type,
+            "signal": signal,
+            "reports": {
+                "market": final_state.get("market_report", ""),
+                "sentiment": final_state.get("sentiment_report", ""),
+                "news": final_state.get("news_report", ""),
+                "fundamentals": final_state.get("fundamentals_report", ""),
+            },
+            "investment_debate_state": final_state.get("investment_debate_state", {}),
+            "risk_debate_state": final_state.get("risk_debate_state", {}),
+            "investment_plan": final_state.get("investment_plan", ""),
+            "trader_investment_plan": final_state.get("trader_investment_plan", ""),
+            "final_trade_decision": final_state.get("final_trade_decision", ""),
+        }
+
+    def _portfolio_analyzed_holding(
+        self,
+        position: PortfolioPosition,
+        analysis_status: str,
+        analysis: Dict[str, Any],
+        extra: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        holding = self._portfolio_holding_base(position)
+        holding.update(
+            {
+                "analysis_status": analysis_status,
+                "analysis_symbol": analysis["symbol"],
+                "analysis": analysis,
+            }
+        )
+        if extra:
+            holding.update(extra)
+        return holding
+
+    def _portfolio_skipped_holding(
+        self,
+        position: PortfolioPosition,
+        reason: str,
+    ) -> Dict[str, Any]:
+        holding = self._portfolio_holding_base(position)
+        holding.update(
+            {
+                "analysis_status": "skipped",
+                "analysis_symbol": None,
+                "analysis": None,
+                "skip_reason": reason,
+            }
+        )
+        return holding
+
+    def _portfolio_holding_base(self, position: PortfolioPosition) -> Dict[str, Any]:
+        instrument = position.instrument
+        return {
+            "symbol": instrument.symbol,
+            "asset_type": instrument.asset_type.value,
+            "current_weight": position.current_weight,
+            "quantity": position.quantity,
+            "market_value": position.market_value,
+            "cost_basis": position.cost_basis,
+            "target_min_weight": position.target_min_weight,
+            "target_max_weight": position.target_max_weight,
+        }
 
     def _run_graph(self, company_name, trade_date, asset_type: str = "stock"):
         """Execute the graph and write the resulting state to disk and memory log."""

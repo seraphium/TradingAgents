@@ -12,7 +12,7 @@ This file tracks the work to extend TradingAgents from single-instrument analysi
 
 - [~] Accept a portfolio containing multiple stocks, options, and cash positions.
 - [x] Validate each component's symbol, asset type, and current portfolio weight.
-- [ ] Reuse the existing single-instrument agent pipeline for each analyzable holding.
+- [x] Reuse the existing single-instrument agent pipeline for each analyzable holding.
 - [ ] Add portfolio-level analytics for allocation, concentration, correlation, volatility, beta, and option Greeks.
 - [ ] Produce a final portfolio recommendation with target weights and per-component actions.
 - [ ] Preserve backward compatibility for the current single-ticker CLI and API flow.
@@ -59,13 +59,13 @@ CASH,cash,0.20,,,,
 
 ## Phase 3: Reuse Single-Instrument Analysis
 
-- [ ] Add `TradingAgentsGraph.propagate_portfolio(portfolio_request)`.
-- [ ] Run the existing single-instrument graph for each stock holding.
-- [ ] For options, analyze both the contract and the underlying where data is available.
-- [ ] Cache or reuse per-symbol reports within a portfolio run.
-- [ ] Collect each holding's analyst reports, debates, trader plan, final decision, and parsed signal.
-- [ ] Keep `TradingAgentsGraph.propagate(company_name, trade_date, asset_type="stock")` unchanged for existing callers.
-- [ ] Add tests proving single-ticker behavior remains backward compatible.
+- [x] Add `TradingAgentsGraph.propagate_portfolio(portfolio_request)`.
+- [x] Run the existing single-instrument graph for each stock holding.
+- [x] For options, analyze both the contract and the underlying where data is available.
+- [x] Cache or reuse per-symbol reports within a portfolio run.
+- [x] Collect each holding's analyst reports, debates, trader plan, final decision, and parsed signal.
+- [x] Keep `TradingAgentsGraph.propagate(company_name, trade_date, asset_type="stock")` unchanged for existing callers.
+- [x] Add tests proving single-ticker behavior remains backward compatible.
 
 Suggested locations:
 
@@ -237,7 +237,7 @@ Suggested test files:
 
 - [x] Add portfolio schemas and validation.
 - [x] Add CSV and JSON portfolio input parsing.
-- [ ] Add `propagate_portfolio()` that runs existing single-symbol analysis per holding.
+- [x] Add `propagate_portfolio()` that runs existing single-symbol analysis per holding.
 - [ ] Add deterministic portfolio analytics.
 - [ ] Add structured portfolio recommendation schema and renderer.
 - [ ] Add portfolio-level manager prompt and final report.
@@ -265,3 +265,4 @@ Use this section to record implementation milestones, decisions, and test result
 | 2026-05-27 | Phase 1 in progress | Added `tradingagents/portfolio` schemas and `tests/test_portfolio_models.py`. Attempted `pytest tests/test_portfolio_models.py`, but external process startup failed with `windows sandbox: spawn setup refresh`; verification is still pending. |
 | 2026-05-27 | Phase 1 verified | Installed `pytest` in the existing `tradingagents` Conda environment and verified `conda run -n tradingagents python -m pytest tests\test_portfolio_models.py`: 14 passed. |
 | 2026-05-27 | Phase 2 verified | Added CSV/JSON parsers in `tradingagents/portfolio/io.py`, exports, and `tests/test_portfolio_io.py`. Verified `conda run -n tradingagents python -m pytest tests\test_portfolio_models.py tests\test_portfolio_io.py`: 24 passed. |
+| 2026-05-27 | Phase 3 verified | Added `TradingAgentsGraph.propagate_portfolio()` to orchestrate existing single-instrument analysis for stock holdings and option underlyings, cache repeated symbols, carry cash as skipped, and collect reports/debates/plans/decisions/signals per holding. Option contract analysis is marked `pending_options_data_support` until Phase 4. Verified `conda run -n tradingagents python -m pytest tests\test_portfolio_models.py tests\test_portfolio_io.py tests\test_portfolio_graph.py`: 27 passed. |
