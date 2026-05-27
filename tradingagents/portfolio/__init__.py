@@ -16,6 +16,13 @@ from tradingagents.portfolio.io import (
     parse_portfolio_json,
     parse_portfolio_json_payload,
 )
+from tradingagents.portfolio.analytics import (
+    ConstraintFlag,
+    OptionGreeks,
+    PortfolioAnalytics,
+    calculate_portfolio_analytics,
+    portfolio_analytics_to_dict,
+)
 
 __all__ = [
     "AssetType",
@@ -25,9 +32,14 @@ __all__ = [
     "PortfolioInstrument",
     "PortfolioPosition",
     "PortfolioRequest",
+    "ConstraintFlag",
+    "OptionGreeks",
+    "PortfolioAnalytics",
+    "calculate_portfolio_analytics",
     "load_portfolio_file",
     "normalize_portfolio_symbol",
     "parse_portfolio_csv",
     "parse_portfolio_json",
     "parse_portfolio_json_payload",
+    "portfolio_analytics_to_dict",
 ]

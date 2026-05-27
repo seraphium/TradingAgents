@@ -13,7 +13,7 @@ This file tracks the work to extend TradingAgents from single-instrument analysi
 - [~] Accept a portfolio containing multiple stocks, options, and cash positions.
 - [x] Validate each component's symbol, asset type, and current portfolio weight.
 - [x] Reuse the existing single-instrument agent pipeline for each analyzable holding.
-- [ ] Add portfolio-level analytics for allocation, concentration, correlation, volatility, beta, and option Greeks.
+- [x] Add portfolio-level analytics for allocation, concentration, correlation, volatility, beta, and option Greeks.
 - [ ] Produce a final portfolio recommendation with target weights and per-component actions.
 - [ ] Preserve backward compatibility for the current single-ticker CLI and API flow.
 
@@ -92,17 +92,17 @@ Suggested locations:
 
 ## Phase 5: Portfolio Analytics
 
-- [ ] Compute current weights and market values.
-- [ ] Compute historical returns for each component where available.
-- [ ] Compute volatility for each holding.
-- [ ] Compute the portfolio correlation matrix.
-- [ ] Compute beta versus the configured benchmark.
-- [ ] Estimate sector, theme, or underlying concentration where data is available.
-- [ ] Compute delta-adjusted exposure for options.
-- [ ] Aggregate option Greeks at the portfolio level.
-- [ ] Estimate risk contribution by component.
-- [ ] Identify overweight and underweight exposures versus configured constraints.
-- [ ] Add tests for each deterministic portfolio metric.
+- [x] Compute current weights and market values.
+- [x] Compute historical returns for each component where available.
+- [x] Compute volatility for each holding.
+- [x] Compute the portfolio correlation matrix.
+- [x] Compute beta versus the configured benchmark.
+- [x] Estimate sector, theme, or underlying concentration where data is available.
+- [x] Compute delta-adjusted exposure for options.
+- [x] Aggregate option Greeks at the portfolio level.
+- [x] Estimate risk contribution by component.
+- [x] Identify overweight and underweight exposures versus configured constraints.
+- [x] Add tests for each deterministic portfolio metric.
 
 Suggested locations:
 
@@ -238,7 +238,7 @@ Suggested test files:
 - [x] Add portfolio schemas and validation.
 - [x] Add CSV and JSON portfolio input parsing.
 - [x] Add `propagate_portfolio()` that runs existing single-symbol analysis per holding.
-- [ ] Add deterministic portfolio analytics.
+- [x] Add deterministic portfolio analytics.
 - [ ] Add structured portfolio recommendation schema and renderer.
 - [ ] Add portfolio-level manager prompt and final report.
 - [ ] Add options chain and Greeks support.
@@ -266,3 +266,4 @@ Use this section to record implementation milestones, decisions, and test result
 | 2026-05-27 | Phase 1 verified | Installed `pytest` in the existing `tradingagents` Conda environment and verified `conda run -n tradingagents python -m pytest tests\test_portfolio_models.py`: 14 passed. |
 | 2026-05-27 | Phase 2 verified | Added CSV/JSON parsers in `tradingagents/portfolio/io.py`, exports, and `tests/test_portfolio_io.py`. Verified `conda run -n tradingagents python -m pytest tests\test_portfolio_models.py tests\test_portfolio_io.py`: 24 passed. |
 | 2026-05-27 | Phase 3 verified | Added `TradingAgentsGraph.propagate_portfolio()` to orchestrate existing single-instrument analysis for stock holdings and option underlyings, cache repeated symbols, carry cash as skipped, and collect reports/debates/plans/decisions/signals per holding. Option contract analysis is marked `pending_options_data_support` until Phase 4. Verified `conda run -n tradingagents python -m pytest tests\test_portfolio_models.py tests\test_portfolio_io.py tests\test_portfolio_graph.py`: 27 passed. |
+| 2026-05-27 | Phase 5 verified | Added provider-agnostic deterministic analytics in `tradingagents/portfolio/analytics.py` with allocation, market value, returns, volatility, correlation, beta, concentration, delta-adjusted exposure, aggregate Greeks, risk contribution, and constraint flags. Verified `conda run -n tradingagents python -m pytest tests\test_portfolio_models.py tests\test_portfolio_io.py tests\test_portfolio_graph.py tests\test_portfolio_analytics.py`: 31 passed. |
