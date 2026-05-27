@@ -8,8 +8,8 @@ from cli.main import (
     load_portfolio_request_for_cli,
     parse_cli_float,
     resolve_analysis_mode,
-    save_portfolio_report_to_disk,
 )
+from tradingagents.portfolio import save_portfolio_report_to_disk
 from tradingagents.graph.trading_graph import TradingAgentsGraph
 from tradingagents.portfolio import (
     AssetType,
@@ -122,15 +122,15 @@ def test_save_portfolio_report_to_disk_writes_expected_shape(tmp_path):
         "final_portfolio_decision": "**Portfolio Action**: Rebalance",
     }
 
-    report_path = save_portfolio_report_to_disk(state, tmp_path / "portfolio_report")
+    report_paths = save_portfolio_report_to_disk(state, tmp_path / "portfolio_report")
 
-    assert report_path.name == "complete_report.md"
+    assert report_paths.complete_report.name == "complete_report.md"
     assert (tmp_path / "portfolio_report" / "holdings" / "AAPL.md").exists()
     assert (tmp_path / "portfolio_report" / "portfolio" / "analytics.json").exists()
     assert (tmp_path / "portfolio_report" / "portfolio" / "rebalance.md").exists()
     assert (tmp_path / "portfolio_report" / "portfolio" / "risk.md").exists()
     assert (tmp_path / "portfolio_report" / "portfolio" / "final_decision.md").exists()
-    assert "Portfolio Analysis Report" in report_path.read_text(encoding="utf-8")
+    assert "Portfolio Analysis Report" in report_paths.complete_report.read_text(encoding="utf-8")
 
 
 @pytest.mark.unit

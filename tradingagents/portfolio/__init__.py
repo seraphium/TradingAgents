@@ -32,6 +32,13 @@ from tradingagents.portfolio.rebalancing import (
     rebalance_proposal_to_dict,
     render_rebalance_proposal,
 )
+from tradingagents.portfolio.reports import (
+    PortfolioReportPaths,
+    default_portfolio_report_dir,
+    render_complete_portfolio_report,
+    render_holding_report,
+    save_portfolio_report_to_disk,
+)
 
 __all__ = [
     "AssetType",
@@ -47,7 +54,9 @@ __all__ = [
     "RATING_SCORES",
     "RebalanceComponent",
     "RebalanceProposal",
+    "PortfolioReportPaths",
     "calculate_portfolio_analytics",
+    "default_portfolio_report_dir",
     "extract_ratings_from_portfolio_result",
     "generate_rebalance_proposal",
     "load_portfolio_file",
@@ -57,5 +66,8 @@ __all__ = [
     "parse_portfolio_json_payload",
     "portfolio_analytics_to_dict",
     "rebalance_proposal_to_dict",
+    "render_complete_portfolio_report",
+    "render_holding_report",
     "render_rebalance_proposal",
+    "save_portfolio_report_to_disk",
 ]

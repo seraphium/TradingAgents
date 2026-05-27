@@ -1,6 +1,5 @@
 from typing import Optional
 import datetime
-import json
 import typer
 import questionary
 from pathlib import Path
@@ -36,7 +35,6 @@ from tradingagents.agents.managers.portfolio_rebalancer import create_portfolio_
 from tradingagents.agents.risk_mgmt.portfolio_risk_analyst import (
     create_portfolio_risk_analyst,
 )
-from tradingagents.dataflows.utils import safe_ticker_component
 from tradingagents.portfolio import (
     AssetType as PortfolioAssetType,
     PortfolioInstrument,
@@ -47,8 +45,8 @@ from tradingagents.portfolio import (
     extract_ratings_from_portfolio_result,
     generate_rebalance_proposal,
     load_portfolio_file,
-    portfolio_analytics_to_dict,
-    rebalance_proposal_to_dict,
+    default_portfolio_report_dir,
+    save_portfolio_report_to_disk,
     render_rebalance_proposal,
 )
 from cli.models import AnalystType
@@ -986,114 +984,6 @@ def save_report_to_disk(final_state, ticker: str, save_path: Path):
     return save_path / "complete_report.md"
 
 
-def save_portfolio_report_to_disk(portfolio_state: dict, save_path: Path) -> Path:
-    """Save a portfolio analysis report under a portfolio-specific directory."""
-
-    save_path.mkdir(parents=True, exist_ok=True)
-    holdings_dir = save_path / "holdings"
-    portfolio_dir = save_path / "portfolio"
-    holdings_dir.mkdir(exist_ok=True)
-    portfolio_dir.mkdir(exist_ok=True)
-
-    for holding in portfolio_state.get("holdings", []):
-        symbol = safe_ticker_component(holding.get("symbol", "UNKNOWN"))
-        (holdings_dir / f"{symbol}.md").write_text(
-            render_holding_report(holding),
-            encoding="utf-8",
-        )
-
-    analytics = portfolio_state.get("portfolio_analytics")
-    if analytics is not None:
-        (portfolio_dir / "analytics.json").write_text(
-            json.dumps(portfolio_analytics_to_dict(analytics), indent=2, default=str),
-            encoding="utf-8",
-        )
-
-    proposal = portfolio_state.get("rebalance_proposal")
-    if proposal is not None:
-        (portfolio_dir / "rebalance.json").write_text(
-            json.dumps(rebalance_proposal_to_dict(proposal), indent=2, default=str),
-            encoding="utf-8",
-        )
-        (portfolio_dir / "rebalance.md").write_text(
-            render_rebalance_proposal(proposal),
-            encoding="utf-8",
-        )
-
-    if portfolio_state.get("portfolio_risk_analysis"):
-        (portfolio_dir / "risk.md").write_text(
-            portfolio_state["portfolio_risk_analysis"],
-            encoding="utf-8",
-        )
-    if portfolio_state.get("portfolio_rebalance_review"):
-        (portfolio_dir / "rebalance_review.md").write_text(
-            portfolio_state["portfolio_rebalance_review"],
-            encoding="utf-8",
-        )
-    if portfolio_state.get("final_portfolio_decision"):
-        (portfolio_dir / "final_decision.md").write_text(
-            portfolio_state["final_portfolio_decision"],
-            encoding="utf-8",
-        )
-
-    complete_report = render_complete_portfolio_report(portfolio_state)
-    complete_path = save_path / "complete_report.md"
-    complete_path.write_text(complete_report, encoding="utf-8")
-    return complete_path
-
-
-def render_holding_report(holding: dict) -> str:
-    parts = [
-        f"# {holding.get('symbol', 'Unknown')}",
-        "",
-        f"- Asset type: {holding.get('asset_type', 'unknown')}",
-        f"- Current weight: {holding.get('current_weight', 0):.2%}",
-        f"- Analysis status: {holding.get('analysis_status', 'unknown')}",
-    ]
-    if holding.get("skip_reason"):
-        parts.append(f"- Skip reason: {holding['skip_reason']}")
-    analysis = holding.get("analysis")
-    if analysis:
-        parts.extend(
-            [
-                "",
-                "## Signal",
-                str(analysis.get("signal", "")),
-                "",
-                "## Final Decision",
-                str(analysis.get("final_trade_decision", "")),
-            ]
-        )
-    return "\n".join(parts)
-
-
-def render_complete_portfolio_report(portfolio_state: dict) -> str:
-    request = portfolio_state.get("portfolio_request")
-    trade_date = portfolio_state.get("trade_date") or getattr(request, "trade_date", "")
-    sections = [
-        "# Portfolio Analysis Report",
-        "",
-        f"Generated: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
-        f"Trade date: {trade_date}",
-        "",
-        "## Holdings",
-    ]
-    for holding in portfolio_state.get("holdings", []):
-        sections.append(
-            f"- {holding.get('symbol')}: {holding.get('current_weight', 0):.2%} "
-            f"({holding.get('analysis_status')})"
-        )
-    if portfolio_state.get("rebalance_proposal"):
-        sections.extend(["", "## Deterministic Rebalance Proposal", render_rebalance_proposal(portfolio_state["rebalance_proposal"])])
-    if portfolio_state.get("portfolio_risk_analysis"):
-        sections.extend(["", "## Portfolio Risk Analysis", portfolio_state["portfolio_risk_analysis"]])
-    if portfolio_state.get("portfolio_rebalance_review"):
-        sections.extend(["", "## Portfolio Rebalance Review", portfolio_state["portfolio_rebalance_review"]])
-    if portfolio_state.get("final_portfolio_decision"):
-        sections.extend(["", "## Final Portfolio Decision", portfolio_state["final_portfolio_decision"]])
-    return "\n".join(sections)
-
-
 def display_portfolio_report(portfolio_state: dict) -> None:
     console.print()
     console.print(Rule("Portfolio Analysis Report", style="bold green"))
@@ -1721,16 +1611,19 @@ def run_portfolio_analysis(
     save_choice = typer.prompt("Save portfolio report?", default="Y").strip().upper()
     if save_choice in ("Y", "YES", ""):
         timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-        default_path = Path.cwd() / "reports" / f"portfolio_{timestamp}"
+        default_path = default_portfolio_report_dir(
+            Path.cwd() / "reports",
+            timestamp=datetime.datetime.strptime(timestamp, "%Y%m%d_%H%M%S"),
+        )
         save_path_str = typer.prompt(
             "Save path (press Enter for default)",
             default=str(default_path),
         ).strip()
         save_path = Path(save_path_str)
         try:
-            report_file = save_portfolio_report_to_disk(portfolio_state, save_path)
+            report_paths = save_portfolio_report_to_disk(portfolio_state, save_path)
             console.print(f"\n[green]✓ Portfolio report saved to:[/green] {save_path.resolve()}")
-            console.print(f"  [dim]Complete report:[/dim] {report_file.name}")
+            console.print(f"  [dim]Complete report:[/dim] {report_paths.complete_report.name}")
         except Exception as exc:
             console.print(f"[red]Error saving portfolio report: {exc}[/red]")
 

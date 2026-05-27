@@ -192,13 +192,13 @@ Suggested locations:
 
 ## Phase 10: Reports
 
-- [ ] Add portfolio report directory generation.
-- [ ] Save per-holding reports.
-- [ ] Save deterministic portfolio analytics as JSON.
-- [ ] Save portfolio risk analysis as Markdown.
-- [ ] Save rebalance proposal as Markdown.
-- [ ] Save final portfolio decision as Markdown.
-- [ ] Add complete report assembly for portfolio runs.
+- [x] Add portfolio report directory generation.
+- [x] Save per-holding reports.
+- [x] Save deterministic portfolio analytics as JSON.
+- [x] Save portfolio risk analysis as Markdown.
+- [x] Save rebalance proposal as Markdown.
+- [x] Save final portfolio decision as Markdown.
+- [x] Add complete report assembly for portfolio runs.
 
 Suggested output shape:
 
@@ -271,3 +271,4 @@ Use this section to record implementation milestones, decisions, and test result
 | 2026-05-27 | Phase 6 verified | Added deterministic rebalancing in `tradingagents/portfolio/rebalancing.py` with rating scores, risk penalties, target-weight constraints, option exposure caps, cash/risk-budget handling, action labels, and Markdown rendering. Verified `conda run -n tradingagents python -m pytest`: 277 passed. |
 | 2026-05-27 | Phase 7 verified | Added portfolio risk analyst, portfolio rebalancer, and portfolio allocation manager nodes that consume deterministic analytics and rebalance proposals while keeping the existing single-instrument portfolio manager unchanged. Verified `conda run -n tradingagents python -m pytest`: 277 passed. |
 | 2026-05-27 | Phase 9 verified | Added CLI portfolio mode selection, `--portfolio-file`, interactive portfolio entry, portfolio progress events, portfolio run orchestration, and portfolio-specific report output. Verified `conda run -n tradingagents python -m pytest`: 283 passed. |
+| 2026-05-27 | Phase 10 verified | Extracted reusable portfolio report rendering/output to `tradingagents/portfolio/reports.py`, including default portfolio report directory names, per-holding Markdown, analytics JSON, rebalance JSON/Markdown, risk/rebalance/final Markdown, and complete report assembly. Verified `conda run -n tradingagents python -m pytest`: 287 passed. |
