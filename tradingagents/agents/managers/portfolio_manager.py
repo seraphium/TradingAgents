@@ -10,11 +10,17 @@ back gracefully to free-text generation.
 
 from __future__ import annotations
 
-from tradingagents.agents.schemas import PortfolioDecision, render_pm_decision
+from tradingagents.agents.schemas import (
+    PortfolioAllocationDecision,
+    PortfolioDecision,
+    render_pm_decision,
+    render_portfolio_allocation_decision,
+)
 from tradingagents.agents.utils.agent_utils import (
     build_instrument_context,
     get_language_instruction,
 )
+from tradingagents.agents.utils.portfolio_prompting import format_portfolio_payload
 from tradingagents.agents.utils.structured import (
     bind_structured,
     invoke_structured_or_freetext,
@@ -90,3 +96,63 @@ Be decisive and ground every conclusion in specific evidence from the analysts.{
         }
 
     return portfolio_manager_node
+
+
+def create_portfolio_allocation_manager(llm):
+    """Create a portfolio-level final decision node.
+
+    This is separate from ``create_portfolio_manager`` so the existing
+    single-instrument portfolio manager contract remains unchanged.
+    """
+
+    structured_llm = bind_structured(
+        llm,
+        PortfolioAllocationDecision,
+        "Portfolio Allocation Manager",
+    )
+
+    def portfolio_allocation_manager_node(state) -> dict:
+        analytics = state.get("portfolio_analytics")
+        rebalance_proposal = state.get("rebalance_proposal")
+        portfolio_risk_analysis = state.get("portfolio_risk_analysis", "")
+        portfolio_rebalance_review = state.get("portfolio_rebalance_review", "")
+        holdings = state.get("holdings", [])
+
+        prompt = f"""As the Portfolio Allocation Manager, deliver the final whole-portfolio decision.
+
+Use the deterministic analytics and rebalance proposal as the numeric source of truth. You may critique the proposal, but do not invent new current weights, target weights, volatility, beta, correlation, Greek, liquidity, or concentration values. The final output must include one component recommendation for every supplied portfolio component.
+
+**Holding Analysis Summaries**
+```json
+{format_portfolio_payload(holdings)}
+```
+
+**Deterministic Portfolio Analytics**
+```json
+{format_portfolio_payload(analytics)}
+```
+
+**Deterministic Rebalance Proposal**
+```json
+{format_portfolio_payload(rebalance_proposal)}
+```
+
+**Portfolio Risk Analyst Notes**
+{portfolio_risk_analysis}
+
+**Portfolio Rebalancer Review**
+{portfolio_rebalance_review}
+
+Choose a portfolio action from Rebalance, Hold, De-risk, or Increase Risk. For each component, provide current weight, target weight, weight change, action, and rationale.{get_language_instruction()}"""
+
+        final_decision = invoke_structured_or_freetext(
+            structured_llm,
+            llm,
+            prompt,
+            render_portfolio_allocation_decision,
+            "Portfolio Allocation Manager",
+        )
+
+        return {"final_portfolio_decision": final_decision}
+
+    return portfolio_allocation_manager_node

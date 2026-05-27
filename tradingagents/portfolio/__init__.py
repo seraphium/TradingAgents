@@ -23,6 +23,15 @@ from tradingagents.portfolio.analytics import (
     calculate_portfolio_analytics,
     portfolio_analytics_to_dict,
 )
+from tradingagents.portfolio.rebalancing import (
+    RATING_SCORES,
+    RebalanceComponent,
+    RebalanceProposal,
+    extract_ratings_from_portfolio_result,
+    generate_rebalance_proposal,
+    rebalance_proposal_to_dict,
+    render_rebalance_proposal,
+)
 
 __all__ = [
     "AssetType",
@@ -35,11 +44,18 @@ __all__ = [
     "ConstraintFlag",
     "OptionGreeks",
     "PortfolioAnalytics",
+    "RATING_SCORES",
+    "RebalanceComponent",
+    "RebalanceProposal",
     "calculate_portfolio_analytics",
+    "extract_ratings_from_portfolio_result",
+    "generate_rebalance_proposal",
     "load_portfolio_file",
     "normalize_portfolio_symbol",
     "parse_portfolio_csv",
     "parse_portfolio_json",
     "parse_portfolio_json_payload",
     "portfolio_analytics_to_dict",
+    "rebalance_proposal_to_dict",
+    "render_rebalance_proposal",
 ]

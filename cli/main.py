@@ -1,5 +1,6 @@
 from typing import Optional
 import datetime
+import json
 import typer
 import questionary
 from pathlib import Path
@@ -28,6 +29,28 @@ from tradingagents.graph.analyst_execution import (
     sync_analyst_tracker_from_chunk,
 )
 from tradingagents.default_config import DEFAULT_CONFIG
+from tradingagents.agents.managers.portfolio_manager import (
+    create_portfolio_allocation_manager,
+)
+from tradingagents.agents.managers.portfolio_rebalancer import create_portfolio_rebalancer
+from tradingagents.agents.risk_mgmt.portfolio_risk_analyst import (
+    create_portfolio_risk_analyst,
+)
+from tradingagents.dataflows.utils import safe_ticker_component
+from tradingagents.portfolio import (
+    AssetType as PortfolioAssetType,
+    PortfolioInstrument,
+    PortfolioParseError,
+    PortfolioPosition,
+    PortfolioRequest,
+    calculate_portfolio_analytics,
+    extract_ratings_from_portfolio_result,
+    generate_rebalance_proposal,
+    load_portfolio_file,
+    portfolio_analytics_to_dict,
+    rebalance_proposal_to_dict,
+    render_rebalance_proposal,
+)
 from cli.models import AnalystType
 from cli.utils import *
 from cli.announcements import fetch_announcements, display_announcements
@@ -462,7 +485,50 @@ def update_display(layout, spinner_text=None, stats_handler=None, start_time=Non
     layout["footer"].update(Panel(stats_table, border_style="grey50"))
 
 
-def get_user_selections():
+def resolve_analysis_mode(
+    mode: str | None = None,
+    portfolio_file: Path | None = None,
+) -> str | None:
+    """Resolve the CLI analysis mode."""
+
+    if portfolio_file is not None:
+        if mode and mode.lower() not in {"portfolio", "p"}:
+            raise typer.BadParameter("--portfolio-file can only be used with portfolio mode")
+        return "portfolio"
+    if mode is None:
+        return None
+    normalized = mode.strip().lower()
+    if normalized in {"single", "ticker", "stock", "s"}:
+        return "single"
+    if normalized in {"portfolio", "p"}:
+        return "portfolio"
+    raise typer.BadParameter("mode must be 'single' or 'portfolio'")
+
+
+def ask_analysis_mode() -> str:
+    choice = questionary.select(
+        "Select analysis mode:",
+        choices=[
+            questionary.Choice("Single ticker", value="single"),
+            questionary.Choice("Portfolio", value="portfolio"),
+        ],
+        style=questionary.Style([
+            ("selected", "fg:green noinherit"),
+            ("highlighted", "fg:green noinherit"),
+            ("pointer", "fg:green noinherit"),
+        ]),
+    ).ask()
+    if choice is None:
+        console.print("\n[red]No analysis mode selected. Exiting...[/red]")
+        raise typer.Exit(1)
+    return choice
+
+
+def get_user_selections(
+    *,
+    portfolio_file: Path | None = None,
+    mode: str | None = None,
+):
     """Get all user selections before starting the analysis display."""
     # Display ASCII art welcome message
     with open(Path(__file__).parent / "static" / "welcome.txt", "r", encoding="utf-8") as f:
@@ -501,19 +567,41 @@ def get_user_selections():
             box_content += f"\n[dim]Default: {default}[/dim]"
         return Panel(box_content, border_style="blue", padding=(1, 2))
 
-    # Step 1: Ticker symbol
-    console.print(
-        create_question_box(
-            "Step 1: Ticker Symbol",
-            "Enter the exact ticker symbol to analyze, including exchange suffix when needed (examples: SPY, CNC.TO, 7203.T, 0700.HK)",
-            "SPY",
+    # Step 1: Analysis mode and instrument input
+    analysis_mode = resolve_analysis_mode(mode, portfolio_file)
+    if analysis_mode is None:
+        console.print(
+            create_question_box(
+                "Step 1: Analysis Mode",
+                "Choose whether to analyze one ticker or a whole portfolio",
+                "Single ticker",
+            )
         )
-    )
-    selected_ticker = get_ticker()
-    asset_type = detect_asset_type(selected_ticker)
-    console.print(
-        f"[green]Detected asset type:[/green] {asset_type.value}"
-    )
+        analysis_mode = ask_analysis_mode()
+
+    selected_ticker = None
+    asset_type = None
+    portfolio_request = None
+    if analysis_mode == "single":
+        console.print(
+            create_question_box(
+                "Step 1: Ticker Symbol",
+                "Enter the exact ticker symbol to analyze, including exchange suffix when needed (examples: SPY, CNC.TO, 7203.T, 0700.HK)",
+                "SPY",
+            )
+        )
+        selected_ticker = get_ticker()
+        asset_type = detect_asset_type(selected_ticker)
+        console.print(
+            f"[green]Detected asset type:[/green] {asset_type.value}"
+        )
+    else:
+        console.print(
+            create_question_box(
+                "Step 1: Portfolio Analysis",
+                "Analyze a CSV/JSON portfolio file or enter positions interactively",
+            )
+        )
 
     # Step 2: Analysis date
     default_date = datetime.datetime.now().strftime("%Y-%m-%d")
@@ -525,6 +613,16 @@ def get_user_selections():
         )
     )
     analysis_date = get_analysis_date()
+
+    if analysis_mode == "portfolio":
+        portfolio_request = load_portfolio_request_for_cli(
+            portfolio_file,
+            trade_date=analysis_date,
+        )
+        console.print(
+            f"[green]Loaded portfolio:[/green] {len(portfolio_request.positions)} positions, "
+            f"{portfolio_request.base_currency}, trade date {portfolio_request.trade_date}"
+        )
 
     # Step 3: Output language
     console.print(
@@ -541,7 +639,7 @@ def get_user_selections():
             "Step 4: Analysts Team", "Select your LLM analyst agents for the analysis"
         )
     )
-    selected_analysts = select_analysts(asset_type)
+    selected_analysts = select_analysts(asset_type or AssetType.STOCK)
     console.print(
         f"[green]Selected analysts:[/green] {', '.join(analyst.value for analyst in selected_analysts)}"
     )
@@ -623,8 +721,11 @@ def get_user_selections():
         anthropic_effort = ask_anthropic_effort()
 
     return {
+        "mode": analysis_mode,
         "ticker": selected_ticker,
-        "asset_type": asset_type.value,
+        "asset_type": asset_type.value if asset_type else "portfolio",
+        "portfolio_request": portfolio_request,
+        "portfolio_file": str(portfolio_file) if portfolio_file else None,
         "analysis_date": analysis_date,
         "analysts": selected_analysts,
         "research_depth": selected_research_depth,
@@ -637,6 +738,120 @@ def get_user_selections():
         "anthropic_effort": anthropic_effort,
         "output_language": output_language,
     }
+
+
+def load_portfolio_request_for_cli(
+    portfolio_file: Path | None,
+    *,
+    trade_date: str,
+) -> PortfolioRequest:
+    """Load or interactively collect a portfolio request for the CLI."""
+
+    if portfolio_file is not None:
+        try:
+            return load_portfolio_file(portfolio_file, trade_date=trade_date)
+        except PortfolioParseError as exc:
+            console.print(f"[red]Could not parse portfolio file: {exc}[/red]")
+            raise typer.Exit(1) from exc
+    return get_interactive_portfolio_request(trade_date)
+
+
+def get_interactive_portfolio_request(trade_date: str) -> PortfolioRequest:
+    """Collect portfolio positions interactively."""
+
+    positions: list[PortfolioPosition] = []
+    console.print("[cyan]Enter portfolio positions. Weights can be decimals or percentages.[/cyan]")
+    while True:
+        position = prompt_portfolio_position(len(positions) + 1)
+        positions.append(position)
+        add_another = questionary.confirm("Add another position?", default=True).ask()
+        if not add_another:
+            break
+
+    try:
+        return PortfolioRequest(positions=positions, trade_date=trade_date)
+    except Exception as exc:
+        console.print(f"[red]Invalid portfolio: {exc}[/red]")
+        raise typer.Exit(1) from exc
+
+
+def prompt_portfolio_position(index: int) -> PortfolioPosition:
+    asset_type = questionary.select(
+        f"Position {index} asset type:",
+        choices=[
+            questionary.Choice("Stock", value=PortfolioAssetType.STOCK),
+            questionary.Choice("Option", value=PortfolioAssetType.OPTION),
+            questionary.Choice("Cash", value=PortfolioAssetType.CASH),
+        ],
+    ).ask()
+    if asset_type is None:
+        raise typer.Exit(1)
+
+    default_symbol = "CASH" if asset_type == PortfolioAssetType.CASH else ""
+    symbol = questionary.text("Symbol:", default=default_symbol).ask()
+    if not symbol:
+        raise typer.Exit(1)
+
+    current_weight = prompt_float("Current weight (0.25 or 25%)", weight=True)
+    quantity = None
+    market_value = None
+    if asset_type == PortfolioAssetType.CASH:
+        market_value = prompt_optional_float("Cash market value (optional)")
+    else:
+        quantity = prompt_optional_float("Quantity/contracts (optional)")
+        market_value = prompt_optional_float("Market value (optional)")
+
+    instrument_kwargs = {"symbol": symbol, "asset_type": asset_type}
+    if asset_type == PortfolioAssetType.OPTION:
+        instrument_kwargs.update(
+            {
+                "underlying": questionary.text("Underlying symbol:").ask(),
+                "expiry": questionary.text("Expiry (YYYY-MM-DD):").ask(),
+                "strike": prompt_float("Strike"),
+                "right": questionary.select(
+                    "Right:",
+                    choices=[
+                        questionary.Choice("Call", value="C"),
+                        questionary.Choice("Put", value="P"),
+                    ],
+                ).ask(),
+            }
+        )
+
+    try:
+        return PortfolioPosition(
+            instrument=PortfolioInstrument(**instrument_kwargs),
+            current_weight=current_weight,
+            quantity=quantity,
+            market_value=market_value,
+        )
+    except Exception as exc:
+        console.print(f"[red]Invalid position: {exc}[/red]")
+        raise typer.Exit(1) from exc
+
+
+def prompt_float(label: str, *, weight: bool = False) -> float:
+    value = questionary.text(label + ":").ask()
+    if value is None:
+        raise typer.Exit(1)
+    return parse_cli_float(value, weight=weight)
+
+
+def prompt_optional_float(label: str) -> float | None:
+    value = questionary.text(label + ":", default="").ask()
+    if value is None or not value.strip():
+        return None
+    return parse_cli_float(value, weight=False)
+
+
+def parse_cli_float(value: str, *, weight: bool = False) -> float:
+    text = value.strip()
+    if weight and text.endswith("%"):
+        return float(text[:-1].strip()) / 100.0
+    number = float(text)
+    if weight and number > 1:
+        return number / 100.0
+    return number
 
 
 def get_ticker():
@@ -769,6 +984,155 @@ def save_report_to_disk(final_state, ticker: str, save_path: Path):
     header = f"# Trading Analysis Report: {ticker}\n\nGenerated: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
     (save_path / "complete_report.md").write_text(header + "\n\n".join(sections), encoding="utf-8")
     return save_path / "complete_report.md"
+
+
+def save_portfolio_report_to_disk(portfolio_state: dict, save_path: Path) -> Path:
+    """Save a portfolio analysis report under a portfolio-specific directory."""
+
+    save_path.mkdir(parents=True, exist_ok=True)
+    holdings_dir = save_path / "holdings"
+    portfolio_dir = save_path / "portfolio"
+    holdings_dir.mkdir(exist_ok=True)
+    portfolio_dir.mkdir(exist_ok=True)
+
+    for holding in portfolio_state.get("holdings", []):
+        symbol = safe_ticker_component(holding.get("symbol", "UNKNOWN"))
+        (holdings_dir / f"{symbol}.md").write_text(
+            render_holding_report(holding),
+            encoding="utf-8",
+        )
+
+    analytics = portfolio_state.get("portfolio_analytics")
+    if analytics is not None:
+        (portfolio_dir / "analytics.json").write_text(
+            json.dumps(portfolio_analytics_to_dict(analytics), indent=2, default=str),
+            encoding="utf-8",
+        )
+
+    proposal = portfolio_state.get("rebalance_proposal")
+    if proposal is not None:
+        (portfolio_dir / "rebalance.json").write_text(
+            json.dumps(rebalance_proposal_to_dict(proposal), indent=2, default=str),
+            encoding="utf-8",
+        )
+        (portfolio_dir / "rebalance.md").write_text(
+            render_rebalance_proposal(proposal),
+            encoding="utf-8",
+        )
+
+    if portfolio_state.get("portfolio_risk_analysis"):
+        (portfolio_dir / "risk.md").write_text(
+            portfolio_state["portfolio_risk_analysis"],
+            encoding="utf-8",
+        )
+    if portfolio_state.get("portfolio_rebalance_review"):
+        (portfolio_dir / "rebalance_review.md").write_text(
+            portfolio_state["portfolio_rebalance_review"],
+            encoding="utf-8",
+        )
+    if portfolio_state.get("final_portfolio_decision"):
+        (portfolio_dir / "final_decision.md").write_text(
+            portfolio_state["final_portfolio_decision"],
+            encoding="utf-8",
+        )
+
+    complete_report = render_complete_portfolio_report(portfolio_state)
+    complete_path = save_path / "complete_report.md"
+    complete_path.write_text(complete_report, encoding="utf-8")
+    return complete_path
+
+
+def render_holding_report(holding: dict) -> str:
+    parts = [
+        f"# {holding.get('symbol', 'Unknown')}",
+        "",
+        f"- Asset type: {holding.get('asset_type', 'unknown')}",
+        f"- Current weight: {holding.get('current_weight', 0):.2%}",
+        f"- Analysis status: {holding.get('analysis_status', 'unknown')}",
+    ]
+    if holding.get("skip_reason"):
+        parts.append(f"- Skip reason: {holding['skip_reason']}")
+    analysis = holding.get("analysis")
+    if analysis:
+        parts.extend(
+            [
+                "",
+                "## Signal",
+                str(analysis.get("signal", "")),
+                "",
+                "## Final Decision",
+                str(analysis.get("final_trade_decision", "")),
+            ]
+        )
+    return "\n".join(parts)
+
+
+def render_complete_portfolio_report(portfolio_state: dict) -> str:
+    request = portfolio_state.get("portfolio_request")
+    trade_date = portfolio_state.get("trade_date") or getattr(request, "trade_date", "")
+    sections = [
+        "# Portfolio Analysis Report",
+        "",
+        f"Generated: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
+        f"Trade date: {trade_date}",
+        "",
+        "## Holdings",
+    ]
+    for holding in portfolio_state.get("holdings", []):
+        sections.append(
+            f"- {holding.get('symbol')}: {holding.get('current_weight', 0):.2%} "
+            f"({holding.get('analysis_status')})"
+        )
+    if portfolio_state.get("rebalance_proposal"):
+        sections.extend(["", "## Deterministic Rebalance Proposal", render_rebalance_proposal(portfolio_state["rebalance_proposal"])])
+    if portfolio_state.get("portfolio_risk_analysis"):
+        sections.extend(["", "## Portfolio Risk Analysis", portfolio_state["portfolio_risk_analysis"]])
+    if portfolio_state.get("portfolio_rebalance_review"):
+        sections.extend(["", "## Portfolio Rebalance Review", portfolio_state["portfolio_rebalance_review"]])
+    if portfolio_state.get("final_portfolio_decision"):
+        sections.extend(["", "## Final Portfolio Decision", portfolio_state["final_portfolio_decision"]])
+    return "\n".join(sections)
+
+
+def display_portfolio_report(portfolio_state: dict) -> None:
+    console.print()
+    console.print(Rule("Portfolio Analysis Report", style="bold green"))
+    if portfolio_state.get("rebalance_proposal"):
+        console.print(
+            Panel(
+                Markdown(render_rebalance_proposal(portfolio_state["rebalance_proposal"])),
+                title="Deterministic Rebalance Proposal",
+                border_style="cyan",
+                padding=(1, 2),
+            )
+        )
+    if portfolio_state.get("portfolio_risk_analysis"):
+        console.print(
+            Panel(
+                Markdown(portfolio_state["portfolio_risk_analysis"]),
+                title="Portfolio Risk Analyst",
+                border_style="red",
+                padding=(1, 2),
+            )
+        )
+    if portfolio_state.get("portfolio_rebalance_review"):
+        console.print(
+            Panel(
+                Markdown(portfolio_state["portfolio_rebalance_review"]),
+                title="Portfolio Rebalancer",
+                border_style="yellow",
+                padding=(1, 2),
+            )
+        )
+    if portfolio_state.get("final_portfolio_decision"):
+        console.print(
+            Panel(
+                Markdown(portfolio_state["final_portfolio_decision"]),
+                title="Portfolio Allocation Manager",
+                border_style="green",
+                padding=(1, 2),
+            )
+        )
 
 
 def display_complete_report(final_state):
@@ -974,9 +1338,14 @@ def format_tool_args(args, max_length=80) -> str:
         return result[:max_length - 3] + "..."
     return result
 
-def run_analysis(checkpoint: bool = False):
+def run_analysis(
+    checkpoint: bool = False,
+    *,
+    portfolio_file: Path | None = None,
+    mode: str | None = None,
+):
     # First get all user selections
-    selections = get_user_selections()
+    selections = get_user_selections(portfolio_file=portfolio_file, mode=mode)
 
     # Create config with selected research depth
     config = DEFAULT_CONFIG.copy()
@@ -1004,6 +1373,15 @@ def run_analysis(checkpoint: bool = False):
         concurrency_limit=config["analyst_concurrency_limit"],
     )
     analyst_wall_time_tracker = AnalystWallTimeTracker(analyst_execution_plan)
+
+    if selections["mode"] == "portfolio":
+        run_portfolio_analysis(
+            selections,
+            config,
+            selected_analyst_keys,
+            stats_handler,
+        )
+        return
 
     # Initialize the graph with callbacks bound to LLMs
     graph = TradingAgentsGraph(
@@ -1263,6 +1641,106 @@ def run_analysis(checkpoint: bool = False):
         display_complete_report(final_state)
 
 
+def run_portfolio_analysis(
+    selections: dict,
+    config: dict,
+    selected_analyst_keys: list[str],
+    stats_handler: StatsCallbackHandler,
+) -> dict:
+    """Run portfolio analysis from a validated PortfolioRequest."""
+
+    portfolio_request = selections["portfolio_request"]
+    if portfolio_request is None:
+        raise typer.BadParameter("portfolio mode requires a portfolio request")
+
+    graph = TradingAgentsGraph(
+        selected_analyst_keys,
+        config=config,
+        debug=False,
+        callbacks=[stats_handler],
+    )
+
+    console.print(Rule("Portfolio Analysis", style="bold cyan"))
+
+    def progress(event: str, payload: dict) -> None:
+        if event == "holding_started":
+            console.print(
+                f"[cyan]Holding:[/cyan] {payload['symbol']} "
+                f"({payload['asset_type']}, {payload['weight']:.2%})"
+            )
+        elif event == "holding_completed":
+            console.print(
+                f"[green]Completed:[/green] {payload['symbol']} "
+                f"[dim]{payload['status']}[/dim]"
+            )
+        elif event == "portfolio_started":
+            console.print(
+                f"[bold]Stage 1/4:[/bold] Single-instrument analysis "
+                f"for {payload['positions']} positions"
+            )
+        elif event == "portfolio_completed":
+            console.print(
+                f"[green]Stage 1 complete:[/green] {payload['holdings']} holdings, "
+                f"{payload['analyses']} analyses"
+            )
+
+    portfolio_result = graph.propagate_portfolio(
+        portfolio_request,
+        progress_callback=progress,
+    )
+
+    console.print("[bold]Stage 2/4:[/bold] Deterministic portfolio analytics")
+    analytics = calculate_portfolio_analytics(portfolio_request)
+
+    console.print("[bold]Stage 3/4:[/bold] Deterministic rebalancing")
+    ratings = extract_ratings_from_portfolio_result(portfolio_result)
+    rebalance_proposal = generate_rebalance_proposal(
+        portfolio_request,
+        analytics,
+        ratings_by_symbol=ratings,
+    )
+
+    portfolio_state = {
+        **portfolio_result,
+        "portfolio_analytics": analytics,
+        "ratings_by_symbol": ratings,
+        "rebalance_proposal": rebalance_proposal,
+    }
+
+    console.print("[bold]Stage 4/4:[/bold] Portfolio-level agent review")
+    risk_node = create_portfolio_risk_analyst(graph.deep_thinking_llm)
+    rebalance_node = create_portfolio_rebalancer(graph.deep_thinking_llm)
+    manager_node = create_portfolio_allocation_manager(graph.deep_thinking_llm)
+
+    portfolio_state.update(risk_node(portfolio_state))
+    portfolio_state.update(rebalance_node(portfolio_state))
+    portfolio_state.update(manager_node(portfolio_state))
+
+    console.print("\n[bold cyan]Portfolio Analysis Complete![/bold cyan]\n")
+
+    save_choice = typer.prompt("Save portfolio report?", default="Y").strip().upper()
+    if save_choice in ("Y", "YES", ""):
+        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        default_path = Path.cwd() / "reports" / f"portfolio_{timestamp}"
+        save_path_str = typer.prompt(
+            "Save path (press Enter for default)",
+            default=str(default_path),
+        ).strip()
+        save_path = Path(save_path_str)
+        try:
+            report_file = save_portfolio_report_to_disk(portfolio_state, save_path)
+            console.print(f"\n[green]✓ Portfolio report saved to:[/green] {save_path.resolve()}")
+            console.print(f"  [dim]Complete report:[/dim] {report_file.name}")
+        except Exception as exc:
+            console.print(f"[red]Error saving portfolio report: {exc}[/red]")
+
+    display_choice = typer.prompt("\nDisplay full portfolio report on screen?", default="Y").strip().upper()
+    if display_choice in ("Y", "YES", ""):
+        display_portfolio_report(portfolio_state)
+
+    return portfolio_state
+
+
 @app.command()
 def analyze(
     checkpoint: bool = typer.Option(
@@ -1275,12 +1753,26 @@ def analyze(
         "--clear-checkpoints",
         help="Delete all saved checkpoints before running (force fresh start).",
     ),
+    mode: Optional[str] = typer.Option(
+        None,
+        "--mode",
+        help="Analysis mode: single or portfolio. Defaults to an interactive selector.",
+    ),
+    portfolio_file: Optional[Path] = typer.Option(
+        None,
+        "--portfolio-file",
+        exists=True,
+        file_okay=True,
+        dir_okay=False,
+        readable=True,
+        help="CSV or JSON portfolio file for portfolio mode.",
+    ),
 ):
     if clear_checkpoints:
         from tradingagents.graph.checkpointer import clear_all_checkpoints
         n = clear_all_checkpoints(DEFAULT_CONFIG["data_cache_dir"])
         console.print(f"[yellow]Cleared {n} checkpoint(s).[/yellow]")
-    run_analysis(checkpoint=checkpoint)
+    run_analysis(checkpoint=checkpoint, portfolio_file=portfolio_file, mode=mode)
 
 
 if __name__ == "__main__":

@@ -338,7 +338,11 @@ class TradingAgentsGraph:
                 self._checkpointer_ctx = None
                 self.graph = self.workflow.compile()
 
-    def propagate_portfolio(self, portfolio_request: PortfolioRequest) -> Dict[str, Any]:
+    def propagate_portfolio(
+        self,
+        portfolio_request: PortfolioRequest,
+        progress_callback=None,
+    ) -> Dict[str, Any]:
         """Run single-instrument analysis for the analyzable portfolio holdings.
 
         This is intentionally an orchestration wrapper around ``propagate`` so
@@ -351,15 +355,34 @@ class TradingAgentsGraph:
         analysis_cache: Dict[Tuple[str, str], Dict[str, Any]] = {}
         holdings: List[Dict[str, Any]] = []
 
+        self._emit_portfolio_progress(
+            progress_callback,
+            "portfolio_started",
+            {"positions": len(portfolio_request.positions), "trade_date": trade_date},
+        )
+
         for position in portfolio_request.positions:
             instrument = position.instrument
+            self._emit_portfolio_progress(
+                progress_callback,
+                "holding_started",
+                {
+                    "symbol": instrument.symbol,
+                    "asset_type": instrument.asset_type.value,
+                    "weight": position.current_weight,
+                },
+            )
 
             if instrument.asset_type == AssetType.CASH:
-                holdings.append(
-                    self._portfolio_skipped_holding(
-                        position,
-                        reason="cash positions do not require single-instrument analysis",
-                    )
+                holding = self._portfolio_skipped_holding(
+                    position,
+                    reason="cash positions do not require single-instrument analysis",
+                )
+                holdings.append(holding)
+                self._emit_portfolio_progress(
+                    progress_callback,
+                    "holding_completed",
+                    {"symbol": instrument.symbol, "status": holding["analysis_status"]},
                 )
                 continue
 
@@ -370,12 +393,16 @@ class TradingAgentsGraph:
                     "stock",
                     analysis_cache,
                 )
-                holdings.append(
-                    self._portfolio_analyzed_holding(
-                        position,
-                        analysis_status="analyzed",
-                        analysis=analysis,
-                    )
+                holding = self._portfolio_analyzed_holding(
+                    position,
+                    analysis_status="analyzed",
+                    analysis=analysis,
+                )
+                holdings.append(holding)
+                self._emit_portfolio_progress(
+                    progress_callback,
+                    "holding_completed",
+                    {"symbol": instrument.symbol, "status": holding["analysis_status"]},
                 )
                 continue
 
@@ -386,28 +413,36 @@ class TradingAgentsGraph:
                     "stock",
                     analysis_cache,
                 )
-                holdings.append(
-                    self._portfolio_analyzed_holding(
-                        position,
-                        analysis_status="underlying_analyzed",
-                        analysis=underlying_analysis,
-                        extra={
-                            "underlying_symbol": instrument.underlying,
-                            "contract_analysis": None,
-                            "contract_analysis_status": "pending_options_data_support",
-                        },
-                    )
+                holding = self._portfolio_analyzed_holding(
+                    position,
+                    analysis_status="underlying_analyzed",
+                    analysis=underlying_analysis,
+                    extra={
+                        "underlying_symbol": instrument.underlying,
+                        "contract_analysis": None,
+                        "contract_analysis_status": "pending_options_data_support",
+                    },
+                )
+                holdings.append(holding)
+                self._emit_portfolio_progress(
+                    progress_callback,
+                    "holding_completed",
+                    {"symbol": instrument.symbol, "status": holding["analysis_status"]},
                 )
                 continue
 
-            holdings.append(
-                self._portfolio_skipped_holding(
-                    position,
-                    reason=f"unsupported asset type: {instrument.asset_type}",
-                )
+            holding = self._portfolio_skipped_holding(
+                position,
+                reason=f"unsupported asset type: {instrument.asset_type}",
+            )
+            holdings.append(holding)
+            self._emit_portfolio_progress(
+                progress_callback,
+                "holding_completed",
+                {"symbol": instrument.symbol, "status": holding["analysis_status"]},
             )
 
-        return {
+        result = {
             "portfolio_request": portfolio_request,
             "trade_date": trade_date,
             "base_currency": portfolio_request.base_currency,
@@ -417,6 +452,21 @@ class TradingAgentsGraph:
                 for (symbol, _asset_type), analysis in analysis_cache.items()
             },
         }
+        self._emit_portfolio_progress(
+            progress_callback,
+            "portfolio_completed",
+            {"holdings": len(holdings), "analyses": len(analysis_cache)},
+        )
+        return result
+
+    def _emit_portfolio_progress(
+        self,
+        progress_callback,
+        event: str,
+        payload: Dict[str, Any],
+    ) -> None:
+        if progress_callback is not None:
+            progress_callback(event, payload)
 
     def _portfolio_analysis_for_symbol(
         self,

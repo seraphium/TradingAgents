@@ -21,7 +21,7 @@ from __future__ import annotations
 from enum import Enum
 from typing import Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 # ---------------------------------------------------------------------------
@@ -51,6 +51,25 @@ class TraderAction(str, Enum):
     BUY = "Buy"
     HOLD = "Hold"
     SELL = "Sell"
+
+
+class ComponentAction(str, Enum):
+    """Per-component portfolio allocation action."""
+
+    BUY = "Buy"
+    ADD = "Add"
+    HOLD = "Hold"
+    TRIM = "Trim"
+    SELL = "Sell"
+
+
+class PortfolioAllocationAction(str, Enum):
+    """Whole-portfolio action for a multi-component allocation decision."""
+
+    REBALANCE = "Rebalance"
+    HOLD = "Hold"
+    DE_RISK = "De-risk"
+    INCREASE_RISK = "Increase Risk"
 
 
 # ---------------------------------------------------------------------------
@@ -226,3 +245,118 @@ def render_pm_decision(decision: PortfolioDecision) -> str:
     if decision.time_horizon:
         parts.extend(["", f"**Time Horizon**: {decision.time_horizon}"])
     return "\n".join(parts)
+
+
+# ---------------------------------------------------------------------------
+# Portfolio Allocation Decision
+# ---------------------------------------------------------------------------
+
+
+class ComponentRecommendation(BaseModel):
+    """Structured recommendation for one portfolio component."""
+
+    symbol: str = Field(
+        description="Portfolio component symbol, e.g. AAPL, an option contract, or CASH.",
+    )
+    current_weight: float = Field(
+        ge=0,
+        le=1,
+        description="Current portfolio allocation as a decimal, e.g. 0.25 for 25%.",
+    )
+    target_weight: float = Field(
+        ge=0,
+        le=1,
+        description="Recommended target allocation as a decimal, e.g. 0.30 for 30%.",
+    )
+    weight_change: float = Field(
+        ge=-1,
+        le=1,
+        description=(
+            "Target minus current portfolio allocation as a decimal. Positive "
+            "means add exposure; negative means reduce exposure."
+        ),
+    )
+    action: ComponentAction = Field(
+        description="Exactly one of Buy / Add / Hold / Trim / Sell.",
+    )
+    rationale: str = Field(
+        description=(
+            "Short rationale for the component action, grounded in the "
+            "portfolio analytics and single-instrument analysis."
+        ),
+    )
+
+    @model_validator(mode="after")
+    def validate_weight_change(self) -> "ComponentRecommendation":
+        expected_change = self.target_weight - self.current_weight
+        if abs(self.weight_change - expected_change) > 0.0001:
+            raise ValueError("weight_change must equal target_weight - current_weight")
+        return self
+
+
+class PortfolioAllocationDecision(BaseModel):
+    """Structured output for a whole-portfolio allocation recommendation."""
+
+    portfolio_action: PortfolioAllocationAction = Field(
+        description="Exactly one of Rebalance / Hold / De-risk / Increase Risk.",
+    )
+    summary: str = Field(
+        description=(
+            "Concise portfolio-level recommendation summarizing the allocation "
+            "change and why it is appropriate."
+        ),
+    )
+    component_recommendations: list[ComponentRecommendation] = Field(
+        min_length=1,
+        description=(
+            "One recommendation per portfolio component, including current "
+            "weight, target weight, action, and rationale."
+        ),
+    )
+    risk_notes: str = Field(
+        description=(
+            "Portfolio-level risk notes covering concentration, volatility, "
+            "correlation, cash, option exposure, and constraint concerns."
+        ),
+    )
+
+
+def render_portfolio_allocation_decision(
+    decision: PortfolioAllocationDecision,
+) -> str:
+    """Render a portfolio allocation decision to Markdown."""
+
+    parts = [
+        f"**Portfolio Action**: {decision.portfolio_action.value}",
+        "",
+        f"**Summary**: {decision.summary}",
+        "",
+        "| Symbol | Current Weight | Target Weight | Change | Action | Rationale |",
+        "| --- | ---: | ---: | ---: | --- | --- |",
+    ]
+    for recommendation in decision.component_recommendations:
+        cells = [
+            _escape_markdown_table_cell(recommendation.symbol),
+            _format_weight(recommendation.current_weight),
+            _format_weight(recommendation.target_weight),
+            _format_signed_weight(recommendation.weight_change),
+            recommendation.action.value,
+            _escape_markdown_table_cell(recommendation.rationale),
+        ]
+        parts.append(f"| {' | '.join(cells)} |")
+    parts.extend(["", f"**Risk Notes**: {decision.risk_notes}"])
+    return "\n".join(parts)
+
+
+def _format_weight(value: float) -> str:
+    return f"{value:.2%}"
+
+
+def _format_signed_weight(value: float) -> str:
+    if abs(value) < 0.00005:
+        value = 0.0
+    return f"{value:+.2%}" if value > 0 else f"{value:.2%}"
+
+
+def _escape_markdown_table_cell(value: str) -> str:
+    return str(value).replace("\n", " ").replace("|", "\\|")

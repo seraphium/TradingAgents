@@ -14,7 +14,7 @@ This file tracks the work to extend TradingAgents from single-instrument analysi
 - [x] Validate each component's symbol, asset type, and current portfolio weight.
 - [x] Reuse the existing single-instrument agent pipeline for each analyzable holding.
 - [x] Add portfolio-level analytics for allocation, concentration, correlation, volatility, beta, and option Greeks.
-- [ ] Produce a final portfolio recommendation with target weights and per-component actions.
+- [x] Produce a final portfolio recommendation with target weights and per-component actions.
 - [ ] Preserve backward compatibility for the current single-ticker CLI and API flow.
 
 ## Phase 1: Portfolio Input Models
@@ -112,14 +112,14 @@ Suggested locations:
 
 ## Phase 6: Deterministic Rebalancing Engine
 
-- [ ] Convert single-instrument ratings into numeric recommendation scores.
-- [ ] Penalize high volatility, high correlation, excessive concentration, and weak liquidity.
-- [ ] Apply minimum and maximum component weight constraints.
-- [ ] Apply maximum option exposure constraints.
-- [ ] Apply cash and risk-budget constraints.
-- [ ] Produce proposed target weights before LLM review.
-- [ ] Generate per-component action labels: `Buy`, `Add`, `Hold`, `Trim`, `Sell`.
-- [ ] Add tests for rebalancing logic and constraint handling.
+- [x] Convert single-instrument ratings into numeric recommendation scores.
+- [x] Penalize high volatility, high correlation, excessive concentration, and weak liquidity.
+- [x] Apply minimum and maximum component weight constraints.
+- [x] Apply maximum option exposure constraints.
+- [x] Apply cash and risk-budget constraints.
+- [x] Produce proposed target weights before LLM review.
+- [x] Generate per-component action labels: `Buy`, `Add`, `Hold`, `Trim`, `Sell`.
+- [x] Add tests for rebalancing logic and constraint handling.
 
 Suggested locations:
 
@@ -128,12 +128,12 @@ Suggested locations:
 
 ## Phase 7: Portfolio-Level Agents
 
-- [ ] Add a portfolio risk analyst prompt or node.
-- [ ] Add a portfolio rebalancer prompt or node.
-- [ ] Add a portfolio-level manager prompt or mode.
-- [ ] Feed deterministic analytics and proposed target weights into the portfolio-level agents.
-- [ ] Ensure the LLM explains and critiques deterministic metrics instead of inventing them.
-- [ ] Preserve the current single-instrument portfolio manager behavior.
+- [x] Add a portfolio risk analyst prompt or node.
+- [x] Add a portfolio rebalancer prompt or node.
+- [x] Add a portfolio-level manager prompt or mode.
+- [x] Feed deterministic analytics and proposed target weights into the portfolio-level agents.
+- [x] Ensure the LLM explains and critiques deterministic metrics instead of inventing them.
+- [x] Preserve the current single-instrument portfolio manager behavior.
 
 Suggested locations:
 
@@ -143,13 +143,13 @@ Suggested locations:
 
 ## Phase 8: Structured Portfolio Decision Output
 
-- [ ] Add `ComponentRecommendation`.
-- [ ] Add a portfolio-level final decision schema.
-- [ ] Include current weight, target weight, weight delta, action, and rationale per component.
-- [ ] Include a portfolio-level action such as `Rebalance`, `Hold`, `De-risk`, or `Increase Risk`.
-- [ ] Include portfolio-level risk notes.
-- [ ] Add a renderer that writes the final decision to Markdown.
-- [ ] Add structured-output tests.
+- [x] Add `ComponentRecommendation`.
+- [x] Add a portfolio-level final decision schema.
+- [x] Include current weight, target weight, weight delta, action, and rationale per component.
+- [x] Include a portfolio-level action such as `Rebalance`, `Hold`, `De-risk`, or `Increase Risk`.
+- [x] Include portfolio-level risk notes.
+- [x] Add a renderer that writes the final decision to Markdown.
+- [x] Add structured-output tests.
 
 Candidate schema shape:
 
@@ -177,12 +177,12 @@ Suggested locations:
 
 ## Phase 9: CLI Support
 
-- [ ] Add a CLI mode selector for single ticker versus portfolio.
-- [ ] Add `--portfolio-file` support for non-interactive runs.
-- [ ] Add interactive portfolio entry for users who do not provide a file.
-- [ ] Show portfolio run progress by holding and by portfolio-level stage.
-- [ ] Save portfolio analysis output under a portfolio-specific report directory.
-- [ ] Keep current `tradingagents analyze` single-ticker behavior intact.
+- [x] Add a CLI mode selector for single ticker versus portfolio.
+- [x] Add `--portfolio-file` support for non-interactive runs.
+- [x] Add interactive portfolio entry for users who do not provide a file.
+- [x] Show portfolio run progress by holding and by portfolio-level stage.
+- [x] Save portfolio analysis output under a portfolio-specific report directory.
+- [x] Keep current `tradingagents analyze` single-ticker behavior intact.
 
 Suggested locations:
 
@@ -239,11 +239,11 @@ Suggested test files:
 - [x] Add CSV and JSON portfolio input parsing.
 - [x] Add `propagate_portfolio()` that runs existing single-symbol analysis per holding.
 - [x] Add deterministic portfolio analytics.
-- [ ] Add structured portfolio recommendation schema and renderer.
-- [ ] Add portfolio-level manager prompt and final report.
+- [x] Add structured portfolio recommendation schema and renderer.
+- [~] Add portfolio-level manager prompt and final report.
 - [ ] Add options chain and Greeks support.
 - [ ] Add optimizer-based rebalancing.
-- [ ] Wire portfolio mode into the CLI.
+- [x] Wire portfolio mode into the CLI.
 - [ ] Expand tests and documentation.
 
 ## Open Design Decisions
@@ -267,3 +267,7 @@ Use this section to record implementation milestones, decisions, and test result
 | 2026-05-27 | Phase 2 verified | Added CSV/JSON parsers in `tradingagents/portfolio/io.py`, exports, and `tests/test_portfolio_io.py`. Verified `conda run -n tradingagents python -m pytest tests\test_portfolio_models.py tests\test_portfolio_io.py`: 24 passed. |
 | 2026-05-27 | Phase 3 verified | Added `TradingAgentsGraph.propagate_portfolio()` to orchestrate existing single-instrument analysis for stock holdings and option underlyings, cache repeated symbols, carry cash as skipped, and collect reports/debates/plans/decisions/signals per holding. Option contract analysis is marked `pending_options_data_support` until Phase 4. Verified `conda run -n tradingagents python -m pytest tests\test_portfolio_models.py tests\test_portfolio_io.py tests\test_portfolio_graph.py`: 27 passed. |
 | 2026-05-27 | Phase 5 verified | Added provider-agnostic deterministic analytics in `tradingagents/portfolio/analytics.py` with allocation, market value, returns, volatility, correlation, beta, concentration, delta-adjusted exposure, aggregate Greeks, risk contribution, and constraint flags. Verified `conda run -n tradingagents python -m pytest tests\test_portfolio_models.py tests\test_portfolio_io.py tests\test_portfolio_graph.py tests\test_portfolio_analytics.py`: 31 passed. |
+| 2026-05-27 | Phase 8 verified | Added structured `ComponentRecommendation` and `PortfolioAllocationDecision` schemas plus a Markdown renderer for portfolio-level final decisions. Verified `conda run -n tradingagents python -m pytest`: 266 passed. |
+| 2026-05-27 | Phase 6 verified | Added deterministic rebalancing in `tradingagents/portfolio/rebalancing.py` with rating scores, risk penalties, target-weight constraints, option exposure caps, cash/risk-budget handling, action labels, and Markdown rendering. Verified `conda run -n tradingagents python -m pytest`: 277 passed. |
+| 2026-05-27 | Phase 7 verified | Added portfolio risk analyst, portfolio rebalancer, and portfolio allocation manager nodes that consume deterministic analytics and rebalance proposals while keeping the existing single-instrument portfolio manager unchanged. Verified `conda run -n tradingagents python -m pytest`: 277 passed. |
+| 2026-05-27 | Phase 9 verified | Added CLI portfolio mode selection, `--portfolio-file`, interactive portfolio entry, portfolio progress events, portfolio run orchestration, and portfolio-specific report output. Verified `conda run -n tradingagents python -m pytest`: 283 passed. |

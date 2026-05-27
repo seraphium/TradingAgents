@@ -13,10 +13,15 @@ import pytest
 
 from tradingagents.agents.managers.research_manager import create_research_manager
 from tradingagents.agents.schemas import (
+    ComponentAction,
+    ComponentRecommendation,
+    PortfolioAllocationAction,
+    PortfolioAllocationDecision,
     PortfolioRating,
     ResearchPlan,
     TraderAction,
     TraderProposal,
+    render_portfolio_allocation_decision,
     render_research_plan,
     render_trader_proposal,
 )
@@ -85,6 +90,85 @@ class TestRenderResearchPlan:
             )
             md = render_research_plan(p)
             assert f"**Recommendation**: {rating.value}" in md
+
+
+@pytest.mark.unit
+class TestRenderPortfolioAllocationDecision:
+    def test_renders_portfolio_action_summary_components_and_risk_notes(self):
+        decision = PortfolioAllocationDecision(
+            portfolio_action=PortfolioAllocationAction.REBALANCE,
+            summary="Trim concentration and add cash while keeping core winners.",
+            component_recommendations=[
+                ComponentRecommendation(
+                    symbol="AAPL",
+                    current_weight=0.50,
+                    target_weight=0.45,
+                    weight_change=-0.05,
+                    action=ComponentAction.TRIM,
+                    rationale="Above target max after strong run.",
+                ),
+                ComponentRecommendation(
+                    symbol="MSFT",
+                    current_weight=0.20,
+                    target_weight=0.25,
+                    weight_change=0.05,
+                    action=ComponentAction.ADD,
+                    rationale="Improves diversification.",
+                ),
+                ComponentRecommendation(
+                    symbol="CASH",
+                    current_weight=0.20,
+                    target_weight=0.20,
+                    weight_change=0.0,
+                    action=ComponentAction.HOLD,
+                    rationale="Reserve remains inside limits.",
+                ),
+            ],
+            risk_notes="AAPL concentration remains the primary risk.",
+        )
+
+        md = render_portfolio_allocation_decision(decision)
+
+        assert "**Portfolio Action**: Rebalance" in md
+        assert "**Summary**: Trim concentration" in md
+        assert "| Symbol | Current Weight | Target Weight | Change | Action | Rationale |" in md
+        assert "| AAPL | 50.00% | 45.00% | -5.00% | Trim | Above target max after strong run. |" in md
+        assert "| MSFT | 20.00% | 25.00% | +5.00% | Add | Improves diversification. |" in md
+        assert "| CASH | 20.00% | 20.00% | 0.00% | Hold | Reserve remains inside limits. |" in md
+        assert "**Risk Notes**: AAPL concentration remains the primary risk." in md
+
+    def test_component_recommendation_validates_weight_change(self):
+        with pytest.raises(ValueError, match="weight_change must equal"):
+            ComponentRecommendation(
+                symbol="NVDA",
+                current_weight=0.10,
+                target_weight=0.20,
+                weight_change=0.05,
+                action=ComponentAction.ADD,
+                rationale="Mismatch should be rejected.",
+            )
+
+    def test_table_cells_escape_pipes_and_line_breaks(self):
+        decision = PortfolioAllocationDecision(
+            portfolio_action=PortfolioAllocationAction.HOLD,
+            summary="No changes.",
+            component_recommendations=[
+                ComponentRecommendation(
+                    symbol="BRK|B",
+                    current_weight=0.10,
+                    target_weight=0.10,
+                    weight_change=0.0,
+                    action=ComponentAction.HOLD,
+                    rationale="Keep | monitor\nliquidity.",
+                )
+            ],
+            risk_notes="Risk unchanged.",
+        )
+
+        md = render_portfolio_allocation_decision(decision)
+
+        assert "BRK\\|B" in md
+        assert "Keep \\| monitor liquidity." in md
 
 
 # ---------------------------------------------------------------------------
