@@ -35,6 +35,9 @@ from tradingagents.portfolio.schemas import (
 from tradingagents.agents.utils.agent_utils import (
     get_stock_data,
     get_indicators,
+    get_options_chain,
+    get_option_contract,
+    get_option_greeks,
     get_fundamentals,
     get_balance_sheet,
     get_cashflow,
@@ -169,6 +172,10 @@ class TradingAgentsGraph:
                     get_stock_data,
                     # Technical indicators
                     get_indicators,
+                    # Options data
+                    get_options_chain,
+                    get_option_contract,
+                    get_option_greeks,
                 ]
             ),
             "social": ToolNode(
@@ -373,31 +380,19 @@ class TradingAgentsGraph:
                 },
             )
 
-            if instrument.asset_type == AssetType.CASH:
-                holding = self._portfolio_skipped_holding(
+            try:
+                holding = self._portfolio_holding_for_position(
                     position,
-                    reason="cash positions do not require single-instrument analysis",
+                    trade_date,
+                    analysis_cache,
                 )
-                holdings.append(holding)
-                self._emit_portfolio_progress(
-                    progress_callback,
-                    "holding_completed",
-                    {"symbol": instrument.symbol, "status": holding["analysis_status"]},
-                )
-                continue
-
-            if instrument.asset_type == AssetType.STOCK:
-                analysis = self._portfolio_analysis_for_symbol(
+            except Exception as exc:
+                logger.warning(
+                    "Portfolio holding analysis failed for %s; continuing: %s",
                     instrument.symbol,
-                    trade_date,
-                    "stock",
-                    analysis_cache,
+                    exc,
                 )
-                holding = self._portfolio_analyzed_holding(
-                    position,
-                    analysis_status="analyzed",
-                    analysis=analysis,
-                )
+                holding = self._portfolio_failed_holding(position, exc)
                 holdings.append(holding)
                 self._emit_portfolio_progress(
                     progress_callback,
@@ -406,35 +401,6 @@ class TradingAgentsGraph:
                 )
                 continue
 
-            if instrument.asset_type == AssetType.OPTION:
-                underlying_analysis = self._portfolio_analysis_for_symbol(
-                    instrument.underlying,
-                    trade_date,
-                    "stock",
-                    analysis_cache,
-                )
-                holding = self._portfolio_analyzed_holding(
-                    position,
-                    analysis_status="underlying_analyzed",
-                    analysis=underlying_analysis,
-                    extra={
-                        "underlying_symbol": instrument.underlying,
-                        "contract_analysis": None,
-                        "contract_analysis_status": "pending_options_data_support",
-                    },
-                )
-                holdings.append(holding)
-                self._emit_portfolio_progress(
-                    progress_callback,
-                    "holding_completed",
-                    {"symbol": instrument.symbol, "status": holding["analysis_status"]},
-                )
-                continue
-
-            holding = self._portfolio_skipped_holding(
-                position,
-                reason=f"unsupported asset type: {instrument.asset_type}",
-            )
             holdings.append(holding)
             self._emit_portfolio_progress(
                 progress_callback,
@@ -467,6 +433,55 @@ class TradingAgentsGraph:
     ) -> None:
         if progress_callback is not None:
             progress_callback(event, payload)
+
+    def _portfolio_holding_for_position(
+        self,
+        position: PortfolioPosition,
+        trade_date: str,
+        analysis_cache: Dict[Tuple[str, str], Dict[str, Any]],
+    ) -> Dict[str, Any]:
+        instrument = position.instrument
+        if instrument.asset_type == AssetType.CASH:
+            return self._portfolio_skipped_holding(
+                position,
+                reason="cash positions do not require single-instrument analysis",
+            )
+
+        if instrument.asset_type == AssetType.STOCK:
+            analysis = self._portfolio_analysis_for_symbol(
+                instrument.symbol,
+                trade_date,
+                "stock",
+                analysis_cache,
+            )
+            return self._portfolio_analyzed_holding(
+                position,
+                analysis_status="analyzed",
+                analysis=analysis,
+            )
+
+        if instrument.asset_type == AssetType.OPTION:
+            underlying_analysis = self._portfolio_analysis_for_symbol(
+                instrument.underlying,
+                trade_date,
+                "stock",
+                analysis_cache,
+            )
+            return self._portfolio_analyzed_holding(
+                position,
+                analysis_status="underlying_analyzed",
+                analysis=underlying_analysis,
+                extra={
+                    "underlying_symbol": instrument.underlying,
+                    "contract_analysis": None,
+                    "contract_analysis_status": "options_data_optional",
+                },
+            )
+
+        return self._portfolio_skipped_holding(
+            position,
+            reason=f"unsupported asset type: {instrument.asset_type}",
+        )
 
     def _portfolio_analysis_for_symbol(
         self,
@@ -547,6 +562,35 @@ class TradingAgentsGraph:
                 "skip_reason": reason,
             }
         )
+        return holding
+
+    def _portfolio_failed_holding(
+        self,
+        position: PortfolioPosition,
+        exc: Exception,
+    ) -> Dict[str, Any]:
+        instrument = position.instrument
+        holding = self._portfolio_holding_base(position)
+        holding.update(
+            {
+                "analysis_status": "failed",
+                "analysis_symbol": None,
+                "analysis": None,
+                "skip_reason": (
+                    "holding analysis failed; portfolio run continued with "
+                    "remaining positions"
+                ),
+                "error": str(exc),
+            }
+        )
+        if instrument.asset_type == AssetType.OPTION:
+            holding.update(
+                {
+                    "underlying_symbol": instrument.underlying,
+                    "contract_analysis": None,
+                    "contract_analysis_status": "options_data_unavailable",
+                }
+            )
         return holding
 
     def _portfolio_holding_base(self, position: PortfolioPosition) -> Dict[str, Any]:

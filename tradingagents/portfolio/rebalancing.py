@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
 from math import isfinite
-from typing import Any, Mapping
+from typing import Any, Literal, Mapping
 
 from tradingagents.agents.utils.rating import parse_rating
 from tradingagents.portfolio.analytics import PortfolioAnalytics
@@ -62,6 +62,7 @@ def generate_rebalance_proposal(
     *,
     ratings_by_symbol: Mapping[str, str] | None = None,
     liquidity_by_symbol: Mapping[str, float] | None = None,
+    optimizer: Literal["heuristic", "mean_variance"] | None = None,
     score_step: float = 0.05,
     change_tolerance: float = 0.005,
 ) -> RebalanceProposal:
@@ -92,16 +93,36 @@ def generate_rebalance_proposal(
         liquidity,
     )
 
+    optimizer_mode = _optimizer_mode(portfolio_request, optimizer)
+    diagnostics: dict[str, Any] = {
+        "score_step": score_step,
+        "change_tolerance": change_tolerance,
+        "optimizer": optimizer_mode,
+    }
     targets = dict(current_weights)
     constraints_applied = {symbol: [] for symbol in positions_by_symbol}
-    for symbol, position in positions_by_symbol.items():
-        if position.instrument.asset_type == AssetType.CASH:
-            continue
-        adjustment = (scores[symbol] + risk_adjustments.get(symbol, 0.0)) * score_step
-        unclamped = targets[symbol] + adjustment
-        targets[symbol] = _clamp(unclamped, *bounds[symbol])
-        if targets[symbol] != unclamped:
-            constraints_applied[symbol].append("component_bounds")
+    if optimizer_mode == "mean_variance":
+        targets, optimizer_diagnostics = _mean_variance_targets(
+            portfolio_request,
+            analytics,
+            current_weights,
+            scores,
+            risk_adjustments,
+            bounds,
+        )
+        diagnostics.update(optimizer_diagnostics)
+        for symbol, target in targets.items():
+            if abs(target - current_weights[symbol]) > change_tolerance:
+                constraints_applied[symbol].append("mean_variance_optimizer")
+    else:
+        for symbol, position in positions_by_symbol.items():
+            if position.instrument.asset_type == AssetType.CASH:
+                continue
+            adjustment = (scores[symbol] + risk_adjustments.get(symbol, 0.0)) * score_step
+            unclamped = targets[symbol] + adjustment
+            targets[symbol] = _clamp(unclamped, *bounds[symbol])
+            if targets[symbol] != unclamped:
+                constraints_applied[symbol].append("component_bounds")
 
     targets = _apply_option_limit(portfolio_request, targets, bounds, constraints_applied)
     targets = _apply_cash_budget(portfolio_request, analytics, targets, bounds, constraints_applied)
@@ -115,6 +136,8 @@ def generate_rebalance_proposal(
         action = _action_for_change(current_weight, target_weight, change_tolerance)
         rating = _rating_for_symbol(symbol, ratings)
         rationale_parts = [f"{rating} rating score {scores[symbol]:+.2f}."]
+        if optimizer_mode == "mean_variance":
+            rationale_parts.append("Target set by mean-variance optimizer.")
         if risk_adjustments.get(symbol):
             rationale_parts.append(f"Risk adjustment {risk_adjustments[symbol]:+.2f}.")
         if constraints_applied[symbol]:
@@ -150,11 +173,7 @@ def generate_rebalance_proposal(
         target_weights_by_symbol=target_weights_by_symbol,
         score_by_symbol=scores,
         risk_notes=risk_notes,
-        diagnostics={
-            "score_step": score_step,
-            "change_tolerance": change_tolerance,
-            "target_sum": sum(target_weights_by_symbol.values()),
-        },
+        diagnostics={**diagnostics, "target_sum": sum(target_weights_by_symbol.values())},
     )
 
 
@@ -358,6 +377,249 @@ def _apply_cash_budget(
         "risk_budget",
     )
     return _distribute_delta(targets, removed, bounds, cash_symbols, constraints_applied, "risk_budget")
+
+
+def _optimizer_mode(
+    portfolio_request: PortfolioRequest,
+    optimizer: Literal["heuristic", "mean_variance"] | None,
+) -> Literal["heuristic", "mean_variance"]:
+    configured = optimizer or portfolio_request.constraints.custom.get(
+        "rebalance_optimizer",
+        "heuristic",
+    )
+    normalized = str(configured).strip().lower().replace("-", "_")
+    if normalized in {"mean_variance", "mean_variance_optimizer", "optimizer"}:
+        return "mean_variance"
+    return "heuristic"
+
+
+def _mean_variance_targets(
+    portfolio_request: PortfolioRequest,
+    analytics: PortfolioAnalytics,
+    current_weights: Mapping[str, float],
+    scores: Mapping[str, float],
+    risk_adjustments: Mapping[str, float],
+    bounds: Mapping[str, tuple[float, float]],
+) -> tuple[dict[str, float], dict[str, Any]]:
+    symbols = [position.instrument.symbol for position in portfolio_request.positions]
+    expected_returns = _optimizer_expected_returns(
+        portfolio_request,
+        symbols,
+        scores,
+        risk_adjustments,
+    )
+    covariance = _optimizer_covariance(portfolio_request, analytics, symbols)
+    optimizer_config = portfolio_request.constraints.custom
+    risk_aversion = _positive_float(
+        optimizer_config.get("optimizer_risk_aversion"),
+        default=1.0,
+    )
+    turnover_penalty = _positive_float(
+        optimizer_config.get("optimizer_turnover_penalty"),
+        default=0.25,
+    )
+    learning_rate = _positive_float(
+        optimizer_config.get("optimizer_learning_rate"),
+        default=0.20,
+    )
+    max_iterations = int(optimizer_config.get("optimizer_iterations", 250))
+    max_iterations = max(1, min(max_iterations, 2000))
+    tolerance = _positive_float(
+        optimizer_config.get("optimizer_tolerance"),
+        default=1e-9,
+    )
+
+    lows = [bounds[symbol][0] for symbol in symbols]
+    highs = [bounds[symbol][1] for symbol in symbols]
+    current = [current_weights[symbol] for symbol in symbols]
+    weights = _project_to_bounded_simplex(current, lows, highs)
+    iterations = 0
+    for iterations in range(1, max_iterations + 1):
+        gradient = _optimizer_gradient(
+            weights,
+            current,
+            covariance,
+            expected_returns,
+            risk_aversion,
+            turnover_penalty,
+        )
+        candidate = [
+            weight - learning_rate * gradient_value
+            for weight, gradient_value in zip(weights, gradient)
+        ]
+        projected = _project_to_bounded_simplex(candidate, lows, highs)
+        if max(abs(new - old) for new, old in zip(projected, weights)) < tolerance:
+            weights = projected
+            break
+        weights = projected
+
+    targets = dict(zip(symbols, weights))
+    return targets, {
+        "optimizer_iterations": iterations,
+        "optimizer_risk_aversion": risk_aversion,
+        "optimizer_turnover_penalty": turnover_penalty,
+        "optimizer_objective": _optimizer_objective(
+            weights,
+            current,
+            covariance,
+            expected_returns,
+            risk_aversion,
+            turnover_penalty,
+        ),
+    }
+
+
+def _optimizer_expected_returns(
+    portfolio_request: PortfolioRequest,
+    symbols: list[str],
+    scores: Mapping[str, float],
+    risk_adjustments: Mapping[str, float],
+) -> list[float]:
+    scale = _positive_float(
+        portfolio_request.constraints.custom.get("optimizer_score_scale"),
+        default=0.05,
+    )
+    expected = []
+    for symbol in symbols:
+        if _position_asset_type(portfolio_request, symbol) == AssetType.CASH:
+            expected.append(0.0)
+        else:
+            expected.append((scores[symbol] + risk_adjustments.get(symbol, 0.0)) * scale)
+    return expected
+
+
+def _optimizer_covariance(
+    portfolio_request: PortfolioRequest,
+    analytics: PortfolioAnalytics,
+    symbols: list[str],
+) -> list[list[float]]:
+    default_volatility = _positive_float(
+        portfolio_request.constraints.custom.get("optimizer_default_volatility"),
+        default=0.20,
+    )
+    default_option_volatility = _positive_float(
+        portfolio_request.constraints.custom.get("optimizer_default_option_volatility"),
+        default=0.60,
+    )
+    volatilities = []
+    for symbol in symbols:
+        volatility = analytics.volatility_by_symbol.get(symbol)
+        if not _is_number(volatility):
+            volatility = (
+                0.0
+                if _position_asset_type(portfolio_request, symbol) == AssetType.CASH
+                else default_option_volatility
+                if _position_asset_type(portfolio_request, symbol) == AssetType.OPTION
+                else default_volatility
+            )
+        volatilities.append(float(volatility))
+
+    covariance: list[list[float]] = []
+    for left_index, left_symbol in enumerate(symbols):
+        row = []
+        for right_index, right_symbol in enumerate(symbols):
+            if left_index == right_index:
+                correlation = 1.0
+            else:
+                correlation = analytics.correlation_matrix.get(left_symbol, {}).get(
+                    right_symbol,
+                    0.0,
+                )
+                if not _is_number(correlation):
+                    correlation = 0.0
+            row.append(float(correlation) * volatilities[left_index] * volatilities[right_index])
+        covariance.append(row)
+    return covariance
+
+
+def _optimizer_gradient(
+    weights: list[float],
+    current_weights: list[float],
+    covariance: list[list[float]],
+    expected_returns: list[float],
+    risk_aversion: float,
+    turnover_penalty: float,
+) -> list[float]:
+    gradient = []
+    for row_index, row in enumerate(covariance):
+        risk_gradient = 2.0 * risk_aversion * sum(
+            covariance_value * weight
+            for covariance_value, weight in zip(row, weights)
+        )
+        return_gradient = -expected_returns[row_index]
+        turnover_gradient = 2.0 * turnover_penalty * (
+            weights[row_index] - current_weights[row_index]
+        )
+        gradient.append(risk_gradient + return_gradient + turnover_gradient)
+    return gradient
+
+
+def _optimizer_objective(
+    weights: list[float],
+    current_weights: list[float],
+    covariance: list[list[float]],
+    expected_returns: list[float],
+    risk_aversion: float,
+    turnover_penalty: float,
+) -> float:
+    variance = 0.0
+    for row_index, row in enumerate(covariance):
+        variance += weights[row_index] * sum(
+            covariance_value * weight
+            for covariance_value, weight in zip(row, weights)
+        )
+    expected_return = sum(
+        weight * expected_return
+        for weight, expected_return in zip(weights, expected_returns)
+    )
+    turnover = sum(
+        (weight - current_weight) ** 2
+        for weight, current_weight in zip(weights, current_weights)
+    )
+    return risk_aversion * variance - expected_return + turnover_penalty * turnover
+
+
+def _project_to_bounded_simplex(
+    values: list[float],
+    lows: list[float],
+    highs: list[float],
+) -> list[float]:
+    low_sum = sum(lows)
+    high_sum = sum(highs)
+    if low_sum > 1.0 + 1e-9 or high_sum < 1.0 - 1e-9:
+        raise ValueError("portfolio target weight bounds are infeasible")
+
+    lower_theta = min(value - high for value, high in zip(values, highs)) - 1.0
+    upper_theta = max(value - low for value, low in zip(values, lows)) + 1.0
+    projected = list(values)
+    for _ in range(100):
+        theta = (lower_theta + upper_theta) / 2.0
+        projected = [
+            _clamp(value - theta, low, high)
+            for value, low, high in zip(values, lows, highs)
+        ]
+        total = sum(projected)
+        if total > 1.0:
+            lower_theta = theta
+        else:
+            upper_theta = theta
+    return projected
+
+
+def _position_asset_type(
+    portfolio_request: PortfolioRequest,
+    symbol: str,
+) -> AssetType:
+    for position in portfolio_request.positions:
+        if position.instrument.symbol == symbol:
+            return position.instrument.asset_type
+    raise KeyError(symbol)
+
+
+def _positive_float(value: Any, *, default: float) -> float:
+    if not _is_number(value) or float(value) <= 0:
+        return default
+    return float(value)
 
 
 def _normalize_targets(

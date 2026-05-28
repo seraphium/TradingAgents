@@ -11,6 +11,11 @@ from .y_finance import (
     get_insider_transactions as get_yfinance_insider_transactions,
 )
 from .yfinance_news import get_news_yfinance, get_global_news_yfinance
+from .yfinance_options import (
+    get_option_contract as get_yfinance_option_contract,
+    get_option_greeks as get_yfinance_option_greeks,
+    get_options_chain as get_yfinance_options_chain,
+)
 from .alpha_vantage import (
     get_stock as get_alpha_vantage_stock,
     get_indicator as get_alpha_vantage_indicator,
@@ -56,6 +61,14 @@ TOOLS_CATEGORIES = {
             "get_news",
             "get_global_news",
             "get_insider_transactions",
+        ]
+    },
+    "options_data": {
+        "description": "Option chains, contracts, and Greeks",
+        "tools": [
+            "get_options_chain",
+            "get_option_contract",
+            "get_option_greeks",
         ]
     }
 }
@@ -106,6 +119,16 @@ VENDOR_METHODS = {
     "get_insider_transactions": {
         "alpha_vantage": get_alpha_vantage_insider_transactions,
         "yfinance": get_yfinance_insider_transactions,
+    },
+    # options_data
+    "get_options_chain": {
+        "yfinance": get_yfinance_options_chain,
+    },
+    "get_option_contract": {
+        "yfinance": get_yfinance_option_contract,
+    },
+    "get_option_greeks": {
+        "yfinance": get_yfinance_option_greeks,
     },
 }
 

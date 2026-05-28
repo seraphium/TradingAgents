@@ -1,0 +1,5 @@
+symbol,asset_type,current_weight,quantity,market_value,underlying,expiry,strike,right,target_min_weight,target_max_weight
+AAPL,stock,0.35,25,,,,,,0.20,0.50
+MSFT,stock,0.30,12,,,,,,0.15,0.45
+AAPL260619C00100000,option,0.05,1,,AAPL,2026-06-19,100,C,0.00,0.08
+CASH,cash,0.30,,30000,,,,,0.10,0.40

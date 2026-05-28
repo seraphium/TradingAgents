@@ -137,8 +137,46 @@ def test_propagate_portfolio_reuses_underlying_analysis_for_options():
     assert option["analysis_symbol"] == "AAPL"
     assert option["underlying_symbol"] == "AAPL"
     assert option["contract_analysis"] is None
-    assert option["contract_analysis_status"] == "pending_options_data_support"
+    assert option["contract_analysis_status"] == "options_data_optional"
     assert option["analysis"] is result["analyses_by_symbol"]["AAPL"]
+
+
+@pytest.mark.unit
+def test_propagate_portfolio_continues_when_option_holding_analysis_fails():
+    graph = TradingAgentsGraph.__new__(TradingAgentsGraph)
+    calls = []
+
+    def propagate(symbol, trade_date, asset_type="stock"):
+        calls.append((symbol, trade_date, asset_type))
+        if symbol == "BAD":
+            raise RuntimeError("option underlying data unavailable")
+        return final_state(symbol), f"signal for {symbol}"
+
+    graph.propagate = propagate
+    request = PortfolioRequest(
+        positions=[
+            option_position("BAD260620C00100000", "BAD", 0.30),
+            stock_position("AAPL", 0.50),
+            cash_position(0.20),
+        ],
+        trade_date="2026-05-27",
+    )
+
+    result = graph.propagate_portfolio(request)
+
+    assert calls == [
+        ("BAD", "2026-05-27", "stock"),
+        ("AAPL", "2026-05-27", "stock"),
+    ]
+    option = result["holdings"][0]
+    assert option["analysis_status"] == "failed"
+    assert option["contract_analysis_status"] == "options_data_unavailable"
+    assert "continued" in option["skip_reason"]
+
+    stock = result["holdings"][1]
+    assert stock["symbol"] == "AAPL"
+    assert stock["analysis_status"] == "analyzed"
+    assert list(result["analyses_by_symbol"]) == ["AAPL"]
 
 
 @pytest.mark.unit

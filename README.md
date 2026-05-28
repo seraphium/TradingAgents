@@ -171,6 +171,29 @@ python -m cli.main     # alternative: run directly from source
 ```
 You will see a screen where you can select your desired tickers, analysis date, LLM provider, research depth, and more.
 
+Portfolio mode analyzes multiple stocks, options, and cash as one allocation:
+```bash
+tradingagents analyze --mode portfolio --portfolio-file examples/portfolio_sample.csv
+tradingagents analyze --mode portfolio --portfolio-file examples/portfolio_sample.json
+```
+
+Portfolio files may be CSV or JSON. Each position needs `symbol`, `asset_type`, and `current_weight`; non-cash positions also need `quantity` or `market_value`. Option positions can provide `underlying`, `expiry`, `strike`, and `right`, or use a standard OCC-style contract symbol that can be parsed. See `examples/portfolio_sample.csv` and `examples/portfolio_sample.json`.
+
+The deterministic rebalance engine uses the existing fixed-step heuristic by default. To enable optimizer-based targets, add this to a JSON portfolio request:
+```json
+{
+  "constraints": {
+    "custom": {
+      "rebalance_optimizer": "mean_variance",
+      "optimizer_risk_aversion": 1.0,
+      "optimizer_turnover_penalty": 0.25
+    }
+  }
+}
+```
+
+Options data support currently uses yfinance for chain lookup, contract lookup, implied volatility, and provider Greeks when available. Missing Greeks fall back to Black-Scholes using the underlying price, implied volatility, expiry, strike, and right. Thinly traded contracts may have missing or stale chain fields. If option data cannot be fetched, TradingAgents treats option-specific fields as unavailable and continues analyzing the remaining stock and cash positions.
+
 <p align="center">
   <img src="assets/cli/cli_init.png" width="100%" style="display: inline-block; margin: 0 2%;">
 </p>

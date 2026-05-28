@@ -10,12 +10,12 @@ This file tracks the work to extend TradingAgents from single-instrument analysi
 
 ## Objectives
 
-- [~] Accept a portfolio containing multiple stocks, options, and cash positions.
+- [x] Accept a portfolio containing multiple stocks, options, and cash positions.
 - [x] Validate each component's symbol, asset type, and current portfolio weight.
 - [x] Reuse the existing single-instrument agent pipeline for each analyzable holding.
 - [x] Add portfolio-level analytics for allocation, concentration, correlation, volatility, beta, and option Greeks.
 - [x] Produce a final portfolio recommendation with target weights and per-component actions.
-- [ ] Preserve backward compatibility for the current single-ticker CLI and API flow.
+- [x] Preserve backward compatibility for the current single-ticker CLI and API flow.
 
 ## Phase 1: Portfolio Input Models
 
@@ -74,14 +74,14 @@ Suggested locations:
 
 ## Phase 4: Options Data Support
 
-- [ ] Add option contract lookup.
-- [ ] Add options chain retrieval.
-- [ ] Add implied volatility support when provided by the data vendor.
-- [ ] Add delta, gamma, theta, vega, and rho support when provided by the data vendor.
-- [ ] Add fallback Greek calculation when provider data is missing.
-- [ ] Compute days to expiry and moneyness.
-- [ ] Register options tools in the dataflow routing layer.
-- [ ] Add tests for option parsing, chain retrieval adapters, and Greek fallback behavior.
+- [x] Add option contract lookup.
+- [x] Add options chain retrieval.
+- [x] Add implied volatility support when provided by the data vendor.
+- [x] Add delta, gamma, theta, vega, and rho support when provided by the data vendor.
+- [x] Add fallback Greek calculation when provider data is missing.
+- [x] Compute days to expiry and moneyness.
+- [x] Register options tools in the dataflow routing layer.
+- [x] Add tests for option parsing, chain retrieval adapters, and Greek fallback behavior.
 
 Suggested locations:
 
@@ -218,12 +218,12 @@ reports/portfolio_YYYYMMDD_HHMMSS/
 
 ## Phase 11: Testing And Documentation
 
-- [ ] Add focused unit tests for all portfolio modules.
-- [ ] Add smoke tests for a minimal two-stock portfolio.
-- [ ] Add tests that mock LLM and data provider calls.
-- [ ] Add README documentation for portfolio mode.
-- [ ] Add example portfolio CSV and JSON files.
-- [ ] Document current limitations around options data availability and vendor support.
+- [x] Add focused unit tests for all portfolio modules.
+- [x] Add smoke tests for a minimal two-stock portfolio.
+- [x] Add tests that mock LLM and data provider calls.
+- [x] Add README documentation for portfolio mode.
+- [x] Add example portfolio CSV and JSON files.
+- [x] Document current limitations around options data availability and vendor support.
 
 Suggested test files:
 
@@ -240,20 +240,20 @@ Suggested test files:
 - [x] Add `propagate_portfolio()` that runs existing single-symbol analysis per holding.
 - [x] Add deterministic portfolio analytics.
 - [x] Add structured portfolio recommendation schema and renderer.
-- [~] Add portfolio-level manager prompt and final report.
-- [ ] Add options chain and Greeks support.
-- [ ] Add optimizer-based rebalancing.
+- [x] Add portfolio-level manager prompt and final report.
+- [x] Add options chain and Greeks support.
+- [x] Add optimizer-based rebalancing.
 - [x] Wire portfolio mode into the CLI.
-- [ ] Expand tests and documentation.
+- [x] Expand tests and documentation.
 
 ## Open Design Decisions
 
-- [ ] Decide whether portfolio mode should be a separate CLI command or a mode inside `analyze`.
-- [ ] Decide the first supported option data vendor and fallback behavior.
-- [ ] Decide whether target weights should be absolute percentages or deltas only in the first release.
-- [ ] Decide how to handle unavailable data for thinly traded options.
+- [x] Decide whether portfolio mode should be a separate CLI command or a mode inside `analyze`.
+- [x] Decide the first supported option data vendor and fallback behavior.
+- [x] Decide whether target weights should be absolute percentages or deltas only in the first release.
+- [x] Decide how to handle unavailable data for thinly traded options.
 - [ ] Decide whether portfolio memory should be stored separately from single-ticker memory.
-- [ ] Decide whether a portfolio run should continue when one holding fails analysis.
+- [x] Decide whether a portfolio run should continue when one holding fails analysis.
 
 ## Progress Notes
 
@@ -272,3 +272,6 @@ Use this section to record implementation milestones, decisions, and test result
 | 2026-05-27 | Phase 7 verified | Added portfolio risk analyst, portfolio rebalancer, and portfolio allocation manager nodes that consume deterministic analytics and rebalance proposals while keeping the existing single-instrument portfolio manager unchanged. Verified `conda run -n tradingagents python -m pytest`: 277 passed. |
 | 2026-05-27 | Phase 9 verified | Added CLI portfolio mode selection, `--portfolio-file`, interactive portfolio entry, portfolio progress events, portfolio run orchestration, and portfolio-specific report output. Verified `conda run -n tradingagents python -m pytest`: 283 passed. |
 | 2026-05-27 | Phase 10 verified | Extracted reusable portfolio report rendering/output to `tradingagents/portfolio/reports.py`, including default portfolio report directory names, per-holding Markdown, analytics JSON, rebalance JSON/Markdown, risk/rebalance/final Markdown, and complete report assembly. Verified `conda run -n tradingagents python -m pytest`: 287 passed. |
+| 2026-05-28 | Phase 4 verified | Added yfinance option chain, contract lookup, implied-volatility, provider Greek, fallback Black-Scholes Greek, days-to-expiry, and moneyness support, plus options dataflow routing and market-node tools. Verified `uv run --with pytest python -m pytest`: 292 passed, 1 skipped. |
+| 2026-05-28 | Optimizer/docs verified | Added opt-in mean-variance optimizer targets with bounds, turnover penalty, risk aversion, and diagnostics; added minimal two-stock smoke coverage, README portfolio-mode docs, and sample CSV/JSON portfolio files. Verified `uv run --with pytest python -m pytest`: 296 passed, 1 skipped. |
+| 2026-05-28 | Option failure handling verified | Made option data tools return an unavailable JSON payload instead of raising when yfinance chain/Greek data fails, and made portfolio propagation record failed holdings while continuing the rest of the portfolio. Verified `uv run --with pytest python -m pytest tests/test_options_dataflows.py tests/test_portfolio_graph.py tests/test_portfolio_smoke.py`: 13 passed. |

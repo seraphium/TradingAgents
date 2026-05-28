@@ -211,6 +211,72 @@ def test_rebalance_applies_risk_budget_to_cash_when_portfolio_volatility_is_high
 
 
 @pytest.mark.unit
+def test_mean_variance_optimizer_sets_targets_and_diagnostics():
+    request = PortfolioRequest(
+        positions=[
+            stock_position("AAPL", 0.35, target_max_weight=0.50),
+            stock_position("MSFT", 0.35, target_min_weight=0.20),
+            cash_position(0.30),
+        ],
+        trade_date="2026-05-27",
+    )
+    analytics = calculate_portfolio_analytics(
+        request,
+        historical_prices={
+            "AAPL": [100, 101, 102, 103, 104],
+            "MSFT": [100, 99, 98, 97, 96],
+        },
+    )
+
+    proposal = generate_rebalance_proposal(
+        request,
+        analytics,
+        ratings_by_symbol={"AAPL": "Buy", "MSFT": "Sell"},
+        optimizer="mean_variance",
+    )
+
+    assert proposal.diagnostics["optimizer"] == "mean_variance"
+    assert proposal.diagnostics["optimizer_iterations"] > 0
+    assert proposal.target_weights_by_symbol["AAPL"] > 0.35
+    assert proposal.target_weights_by_symbol["MSFT"] < 0.35
+    assert proposal.target_weights_by_symbol["AAPL"] <= 0.50
+    assert proposal.target_weights_by_symbol["MSFT"] >= 0.20
+    assert sum(proposal.target_weights_by_symbol.values()) == pytest.approx(1.0)
+    assert any(
+        "mean_variance_optimizer" in component.constraints_applied
+        for component in proposal.component_proposals
+    )
+
+
+@pytest.mark.unit
+def test_mean_variance_optimizer_penalizes_high_volatility_equal_rating():
+    request = PortfolioRequest(
+        positions=[
+            stock_position("LOWVOL", 0.35),
+            stock_position("HIGHVOL", 0.35),
+            cash_position(0.30),
+        ],
+        trade_date="2026-05-27",
+    )
+    analytics = calculate_portfolio_analytics(
+        request,
+        historical_prices={
+            "LOWVOL": [100, 101, 102, 103, 104],
+            "HIGHVOL": [100, 140, 80, 150, 70],
+        },
+    )
+
+    proposal = generate_rebalance_proposal(
+        request,
+        analytics,
+        ratings_by_symbol={"LOWVOL": "Buy", "HIGHVOL": "Buy"},
+        optimizer="mean_variance",
+    )
+
+    assert proposal.target_weights_by_symbol["LOWVOL"] > proposal.target_weights_by_symbol["HIGHVOL"]
+
+
+@pytest.mark.unit
 def test_extract_ratings_from_portfolio_result_and_render_markdown():
     ratings = extract_ratings_from_portfolio_result(
         {

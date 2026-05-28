@@ -1,0 +1,52 @@
+{
+  "trade_date": "2026-05-28",
+  "base_currency": "USD",
+  "constraints": {
+    "max_single_position_weight": 0.50,
+    "max_options_weight": 0.10,
+    "min_cash_weight": 0.10,
+    "custom": {
+      "rebalance_optimizer": "mean_variance",
+      "optimizer_risk_aversion": 1.0,
+      "optimizer_turnover_penalty": 0.25
+    }
+  },
+  "positions": [
+    {
+      "symbol": "AAPL",
+      "asset_type": "stock",
+      "current_weight": 0.35,
+      "quantity": 25,
+      "target_min_weight": 0.20,
+      "target_max_weight": 0.50
+    },
+    {
+      "symbol": "MSFT",
+      "asset_type": "stock",
+      "current_weight": 0.30,
+      "quantity": 12,
+      "target_min_weight": 0.15,
+      "target_max_weight": 0.45
+    },
+    {
+      "symbol": "AAPL260619C00100000",
+      "asset_type": "option",
+      "current_weight": 0.05,
+      "quantity": 1,
+      "underlying": "AAPL",
+      "expiry": "2026-06-19",
+      "strike": 100,
+      "right": "C",
+      "target_min_weight": 0.0,
+      "target_max_weight": 0.08
+    },
+    {
+      "symbol": "CASH",
+      "asset_type": "cash",
+      "current_weight": 0.30,
+      "market_value": 30000,
+      "target_min_weight": 0.10,
+      "target_max_weight": 0.40
+    }
+  ]
+}
