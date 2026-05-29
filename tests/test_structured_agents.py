@@ -105,6 +105,7 @@ class TestRenderPortfolioAllocationDecision:
                     target_weight=0.45,
                     weight_change=-0.05,
                     action=ComponentAction.TRIM,
+                    component_summary="Single-stock PM says trim after a strong run.",
                     rationale="Above target max after strong run.",
                 ),
                 ComponentRecommendation(
@@ -113,6 +114,7 @@ class TestRenderPortfolioAllocationDecision:
                     target_weight=0.25,
                     weight_change=0.05,
                     action=ComponentAction.ADD,
+                    component_summary="Single-stock PM supports adding MSFT.",
                     rationale="Improves diversification.",
                 ),
                 ComponentRecommendation(
@@ -121,6 +123,7 @@ class TestRenderPortfolioAllocationDecision:
                     target_weight=0.20,
                     weight_change=0.0,
                     action=ComponentAction.HOLD,
+                    component_summary="Cash remains the portfolio reserve.",
                     rationale="Reserve remains inside limits.",
                 ),
             ],
@@ -131,6 +134,8 @@ class TestRenderPortfolioAllocationDecision:
 
         assert "**Portfolio Action**: Rebalance" in md
         assert "**Summary**: Trim concentration" in md
+        assert "**Component Summary**:" in md
+        assert "Single-stock PM says trim after a strong run" in md
         assert "| Symbol | Current Weight | Target Weight | Change | Action | Rationale |" in md
         assert "| AAPL | 50.00% | 45.00% | -5.00% | Trim | Above target max after strong run. |" in md
         assert "| MSFT | 20.00% | 25.00% | +5.00% | Add | Improves diversification. |" in md
@@ -145,6 +150,7 @@ class TestRenderPortfolioAllocationDecision:
                 target_weight=0.20,
                 weight_change=0.05,
                 action=ComponentAction.ADD,
+                component_summary="Single-stock PM supports adding.",
                 rationale="Mismatch should be rejected.",
             )
 
@@ -159,6 +165,7 @@ class TestRenderPortfolioAllocationDecision:
                     target_weight=0.10,
                     weight_change=0.0,
                     action=ComponentAction.HOLD,
+                    component_summary="Single-stock PM says Hold | monitor.",
                     rationale="Keep | monitor\nliquidity.",
                 )
             ],

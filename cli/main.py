@@ -43,6 +43,7 @@ from tradingagents.portfolio import (
     PortfolioRequest,
     calculate_portfolio_analytics,
     extract_ratings_from_portfolio_result,
+    extract_holding_evidence_from_portfolio_result,
     generate_rebalance_proposal,
     load_portfolio_file,
     default_portfolio_report_dir,
@@ -1588,6 +1589,7 @@ def run_portfolio_analysis(
         portfolio_request,
         analytics,
         ratings_by_symbol=ratings,
+        holdings=extract_holding_evidence_from_portfolio_result(portfolio_result),
     )
 
     portfolio_state = {

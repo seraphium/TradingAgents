@@ -279,10 +279,17 @@ class ComponentRecommendation(BaseModel):
     action: ComponentAction = Field(
         description="Exactly one of Buy / Add / Hold / Trim / Sell.",
     )
+    component_summary: str = Field(
+        description=(
+            "Concise summary of the single-instrument final conclusion and "
+            "debate evidence for this component. For cash, describe the "
+            "liquidity or reserve role instead."
+        ),
+    )
     rationale: str = Field(
         description=(
-            "Short rationale for the component action, grounded in the "
-            "portfolio analytics and single-instrument analysis."
+            "Short execution rationale for the component action, grounded in "
+            "the portfolio analytics and single-instrument analysis."
         ),
     )
 
@@ -331,9 +338,15 @@ def render_portfolio_allocation_decision(
         "",
         f"**Summary**: {decision.summary}",
         "",
+        "**Component Summary**:",
+    ]
+    for recommendation in decision.component_recommendations:
+        parts.append(f"- {recommendation.symbol}: {recommendation.component_summary}")
+    parts.extend([
+        "",
         "| Symbol | Current Weight | Target Weight | Change | Action | Rationale |",
         "| --- | ---: | ---: | ---: | --- | --- |",
-    ]
+    ])
     for recommendation in decision.component_recommendations:
         cells = [
             _escape_markdown_table_cell(recommendation.symbol),

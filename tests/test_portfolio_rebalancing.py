@@ -303,8 +303,91 @@ def test_extract_ratings_from_portfolio_result_and_render_markdown():
         request,
         calculate_portfolio_analytics(request),
         ratings_by_symbol=ratings,
+        holdings=[
+            {
+                "symbol": "AAPL",
+                "analysis_status": "analyzed",
+                "analysis": {
+                    "final_trade_decision": (
+                        "**Rating**: Overweight\n\n"
+                        "Final conclusion: add AAPL gradually because the "
+                        "business quality and upside justify a larger position."
+                    ),
+                    "trader_investment_plan": "Add AAPL only within concentration limits.",
+                    "risk_debate_state": {
+                        "judge_decision": "Risk manager accepts a modest add.",
+                    },
+                },
+            },
+            {
+                "symbol": "CASH",
+                "asset_type": "cash",
+                "analysis": None,
+            },
+        ],
     )
     markdown = render_rebalance_proposal(proposal)
 
     assert "**Portfolio Action**:" in markdown
+    assert "**Why Rebalance**:" in markdown
+    assert "**Component Summary**:" in markdown
+    assert "Final conclusion: add AAPL gradually" in markdown
+    assert "Aggregate single-stock signals" in markdown
+    assert "Rebalance reason:" not in markdown
     assert "| AAPL |" in markdown
+
+
+@pytest.mark.unit
+def test_rebalance_reason_uses_portfolio_level_sector_and_theme_context():
+    request = PortfolioRequest(
+        positions=[
+            stock_position("NVDA", 0.35),
+            stock_position("AMD", 0.25),
+            stock_position("MSFT", 0.20),
+            cash_position(0.20),
+        ],
+        trade_date="2026-05-27",
+        constraints=PortfolioConstraints(
+            min_cash_weight=0.10,
+            custom={
+                "rebalance_optimizer": "mean_variance",
+                "theme_by_symbol": {
+                    "NVDA": "chip-related",
+                    "AMD": "chip-related",
+                    "MSFT": "software",
+                },
+                "max_theme_exposure": 0.45,
+                "max_sector_exposure": 0.45,
+            },
+        ),
+    )
+    analytics = calculate_portfolio_analytics(
+        request,
+        historical_prices={
+            "NVDA": [100, 105, 95, 110, 90],
+            "AMD": [100, 104, 96, 108, 92],
+            "MSFT": [100, 101, 102, 103, 104],
+        },
+        sector_by_symbol={
+            "NVDA": "Semiconductors",
+            "AMD": "Semiconductors",
+            "MSFT": "Software",
+        },
+    )
+
+    proposal = generate_rebalance_proposal(
+        request,
+        analytics,
+        ratings_by_symbol={
+            "NVDA": "Underweight",
+            "AMD": "Underweight",
+            "MSFT": "Overweight",
+        },
+        optimizer="mean_variance",
+    )
+    markdown = render_rebalance_proposal(proposal)
+
+    assert "Portfolio-level risk view" in markdown
+    assert "Semiconductors 60.00%" in markdown
+    assert "chip-related 60.00%" in markdown
+    assert "Aggregate single-stock signals" in markdown

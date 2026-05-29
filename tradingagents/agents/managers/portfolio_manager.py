@@ -20,7 +20,10 @@ from tradingagents.agents.utils.agent_utils import (
     build_instrument_context,
     get_language_instruction,
 )
-from tradingagents.agents.utils.portfolio_prompting import format_portfolio_payload
+from tradingagents.agents.utils.portfolio_prompting import (
+    format_holding_evidence,
+    format_portfolio_payload,
+)
 from tradingagents.agents.utils.structured import (
     bind_structured,
     invoke_structured_or_freetext,
@@ -122,9 +125,11 @@ def create_portfolio_allocation_manager(llm):
 
 Use the deterministic analytics and rebalance proposal as the numeric source of truth. You may critique the proposal, but do not invent new current weights, target weights, volatility, beta, correlation, Greek, liquidity, or concentration values. The final output must include one component recommendation for every supplied portfolio component.
 
-**Holding Analysis Summaries**
+Use the single-stock Portfolio Manager decisions and the aggressive/conservative/neutral debate evidence as the qualitative source of truth for each holding. Do not repeat one rebalance reason per stock. Instead, form one whole-portfolio thesis that reconciles all holding-level conclusions with sector, industry, or theme exposure; concentration; correlation; total volatility; cash; options exposure; and target-weight constraints.
+
+**Single-Stock Decision Evidence**
 ```json
-{format_portfolio_payload(holdings)}
+{format_holding_evidence(holdings)}
 ```
 
 **Deterministic Portfolio Analytics**
@@ -143,7 +148,7 @@ Use the deterministic analytics and rebalance proposal as the numeric source of 
 **Portfolio Rebalancer Review**
 {portfolio_rebalance_review}
 
-Choose a portfolio action from Rebalance, Hold, De-risk, or Increase Risk. For each component, provide current weight, target weight, weight change, action, and rationale.{get_language_instruction()}"""
+Choose a portfolio action from Rebalance, Hold, De-risk, or Increase Risk. The summary must be a portfolio-level recommendation, for example reducing an over-concentrated industry/theme exposure or lowering total volatility while preserving the strongest single-stock conclusions. For each component, provide current weight, target weight, weight change, action, a component summary based on the single-stock final conclusion, and a concise execution rationale.{get_language_instruction()}"""
 
         final_decision = invoke_structured_or_freetext(
             structured_llm,
