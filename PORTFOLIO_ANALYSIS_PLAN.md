@@ -98,6 +98,7 @@ Suggested locations:
 - [x] Compute the portfolio correlation matrix.
 - [x] Compute beta versus the configured benchmark.
 - [x] Estimate sector, theme, or underlying concentration where data is available.
+- [x] Fetch best-effort holding history, benchmark history, and sector labels before portfolio-level agent review.
 - [x] Compute delta-adjusted exposure for options.
 - [x] Aggregate option Greeks at the portfolio level.
 - [x] Estimate risk contribution by component.
@@ -275,3 +276,4 @@ Use this section to record implementation milestones, decisions, and test result
 | 2026-05-28 | Phase 4 verified | Added yfinance option chain, contract lookup, implied-volatility, provider Greek, fallback Black-Scholes Greek, days-to-expiry, and moneyness support, plus options dataflow routing and market-node tools. Verified `uv run --with pytest python -m pytest`: 292 passed, 1 skipped. |
 | 2026-05-28 | Optimizer/docs verified | Added opt-in mean-variance optimizer targets with bounds, turnover penalty, risk aversion, and diagnostics; added minimal two-stock smoke coverage, README portfolio-mode docs, and sample CSV/JSON portfolio files. Verified `uv run --with pytest python -m pytest`: 296 passed, 1 skipped. |
 | 2026-05-28 | Option failure handling verified | Made option data tools return an unavailable JSON payload instead of raising when yfinance chain/Greek data fails, and made portfolio propagation record failed holdings while continuing the rest of the portfolio. Verified `uv run --with pytest python -m pytest tests/test_options_dataflows.py tests/test_portfolio_graph.py tests/test_portfolio_smoke.py`: 13 passed. |
+| 2026-05-29 | Portfolio analytics input collection verified | Added best-effort collection of holding price history, configured benchmark history, and sector/industry labels before deterministic portfolio analytics. Option positions reuse underlying stock history for correlation/risk inputs, and unavailable provider data is recorded as a warning so analysis continues. Verified `uv run --with pytest python -m pytest`: 306 passed, 7 warnings. |

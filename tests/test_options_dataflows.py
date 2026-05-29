@@ -12,7 +12,11 @@ from tradingagents.dataflows.yfinance_options import (
     retrieve_option_greeks,
     retrieve_options_chain,
 )
-from tradingagents.agents.utils.options_tools import get_options_chain
+from tradingagents.agents.utils.options_tools import (
+    get_option_contract,
+    get_option_greeks,
+    get_options_chain,
+)
 
 
 class FakeTicker:
@@ -188,5 +192,65 @@ def test_options_tool_returns_unavailable_payload_when_vendor_fails(monkeypatch)
     parsed = json.loads(payload)
 
     assert parsed["status"] == "unavailable"
+    assert parsed["underlying"] == "AAPL"
+    assert "Continue the portfolio analysis" in parsed["message"]
+
+
+@pytest.mark.unit
+def test_option_contract_tool_returns_unavailable_payload_when_vendor_fails(
+    monkeypatch,
+):
+    def fail_route(*args, **kwargs):
+        raise RuntimeError("alpha vantage options endpoint is premium")
+
+    monkeypatch.setattr(
+        "tradingagents.agents.utils.options_tools.route_to_vendor",
+        fail_route,
+    )
+
+    payload = get_option_contract.invoke(
+        {
+            "underlying": "AAPL",
+            "expiry": "2026-06-19",
+            "strike": 200,
+            "right": "C",
+            "curr_date": "2026-05-28",
+            "contract_symbol": "AAPL260619C00200000",
+        }
+    )
+    parsed = json.loads(payload)
+
+    assert parsed["status"] == "unavailable"
+    assert parsed["tool"] == "get_option_contract"
+    assert parsed["underlying"] == "AAPL"
+    assert "option-specific chain and Greek fields as missing" in parsed["message"]
+
+
+@pytest.mark.unit
+def test_option_greeks_tool_returns_unavailable_payload_when_vendor_fails(
+    monkeypatch,
+):
+    def fail_route(*args, **kwargs):
+        raise RuntimeError("options greeks unavailable")
+
+    monkeypatch.setattr(
+        "tradingagents.agents.utils.options_tools.route_to_vendor",
+        fail_route,
+    )
+
+    payload = get_option_greeks.invoke(
+        {
+            "underlying": "AAPL",
+            "expiry": "2026-06-19",
+            "strike": 200,
+            "right": "C",
+            "curr_date": "2026-05-28",
+            "contract_symbol": "AAPL260619C00200000",
+        }
+    )
+    parsed = json.loads(payload)
+
+    assert parsed["status"] == "unavailable"
+    assert parsed["tool"] == "get_option_greeks"
     assert parsed["underlying"] == "AAPL"
     assert "Continue the portfolio analysis" in parsed["message"]
