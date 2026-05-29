@@ -19,6 +19,7 @@ from tradingagents.agents.schemas import (
 from tradingagents.portfolio import (
     AssetType,
     PortfolioInstrument,
+    PortfolioMarketContext,
     PortfolioPosition,
     PortfolioRequest,
     calculate_portfolio_analytics,
@@ -60,6 +61,13 @@ def _portfolio_state() -> dict:
     return {
         "portfolio_request": request,
         "portfolio_analytics": analytics,
+        "portfolio_market_context": PortfolioMarketContext(
+            benchmark_symbol="SPY",
+            global_news="Macro news points to tighter liquidity.",
+            benchmark_news="SPY news shows broad market risk appetite cooling.",
+            benchmark_fundamentals="SPY fundamentals unavailable for ETF.",
+            benchmark_indicators={"rsi": "RSI is elevated."},
+        ),
         "rebalance_proposal": proposal,
         "holdings": [
             {
@@ -165,6 +173,8 @@ def test_portfolio_risk_analyst_prompt_uses_deterministic_metrics():
     assert result["portfolio_risk_analysis"] == "Risk review markdown."
     assert "using only the supplied deterministic metrics" in captured["prompt"]
     assert "Single-Stock Decision Evidence" in captured["prompt"]
+    assert "Portfolio-Wide Market Context" in captured["prompt"]
+    assert "tighter liquidity" in captured["prompt"]
     assert "Conservative analyst wants a larger trim" in captured["prompt"]
     assert "Deterministic Portfolio Analytics" in captured["prompt"]
     assert "AAPL" in captured["prompt"]
@@ -184,6 +194,7 @@ def test_portfolio_rebalancer_prompt_reviews_target_weights():
     assert result["portfolio_rebalance_review"] == "Rebalance review markdown."
     assert "numeric source of truth" in captured["prompt"]
     assert "Single-Stock Decision Evidence" in captured["prompt"]
+    assert "Portfolio-Wide Market Context" in captured["prompt"]
     assert "Risk manager recommends smaller AAPL exposure" in captured["prompt"]
     assert "Deterministic Rebalance Proposal" in captured["prompt"]
     assert "Risk analyst says concentration is high." in captured["prompt"]
@@ -207,6 +218,7 @@ def test_portfolio_allocation_manager_returns_structured_final_decision():
     assert "Single-stock PM and risk debate support trimming AAPL" in decision
     assert "| AAPL | 60.00% | 55.00% | -5.00% | Trim |" in decision
     assert "Use the deterministic analytics" in captured["prompt"]
+    assert "Portfolio-Wide Market Context" in captured["prompt"]
     assert "single-stock Portfolio Manager decisions" in captured["prompt"]
     assert "**Rating**: Underweight" in captured["prompt"]
     assert "summary must be a portfolio-level recommendation" in captured["prompt"]

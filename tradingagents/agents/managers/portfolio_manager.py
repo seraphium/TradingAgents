@@ -116,6 +116,7 @@ def create_portfolio_allocation_manager(llm):
 
     def portfolio_allocation_manager_node(state) -> dict:
         analytics = state.get("portfolio_analytics")
+        market_context = state.get("portfolio_market_context")
         rebalance_proposal = state.get("rebalance_proposal")
         portfolio_risk_analysis = state.get("portfolio_risk_analysis", "")
         portfolio_rebalance_review = state.get("portfolio_rebalance_review", "")
@@ -130,6 +131,11 @@ Use the single-stock Portfolio Manager decisions and the aggressive/conservative
 **Single-Stock Decision Evidence**
 ```json
 {format_holding_evidence(holdings)}
+```
+
+**Portfolio-Wide Market Context**
+```json
+{format_portfolio_payload(market_context)}
 ```
 
 **Deterministic Portfolio Analytics**
@@ -148,7 +154,7 @@ Use the single-stock Portfolio Manager decisions and the aggressive/conservative
 **Portfolio Rebalancer Review**
 {portfolio_rebalance_review}
 
-Choose a portfolio action from Rebalance, Hold, De-risk, or Increase Risk. The summary must be a portfolio-level recommendation, for example reducing an over-concentrated industry/theme exposure or lowering total volatility while preserving the strongest single-stock conclusions. For each component, provide current weight, target weight, weight change, action, a component summary based on the single-stock final conclusion, and a concise execution rationale.{get_language_instruction()}"""
+Choose a portfolio action from Rebalance, Hold, De-risk, or Increase Risk. The summary must be a portfolio-level recommendation, for example reducing an over-concentrated industry/theme exposure, responding to broad market/news/sentiment/fundamental conditions, or lowering total volatility while preserving the strongest single-stock conclusions. For each component, provide current weight, target weight, weight change, action, a component summary based on the single-stock final conclusion, and a concise execution rationale.{get_language_instruction()}"""
 
         final_decision = invoke_structured_or_freetext(
             structured_llm,

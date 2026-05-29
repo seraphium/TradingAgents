@@ -27,6 +27,10 @@ from tradingagents.portfolio.data_inputs import (
     PortfolioAnalyticsInputs,
     collect_portfolio_analytics_inputs,
 )
+from tradingagents.portfolio.market_context import (
+    PortfolioMarketContext,
+    collect_portfolio_market_context,
+)
 from tradingagents.portfolio.rebalancing import (
     RATING_SCORES,
     RebalanceComponent,
@@ -57,12 +61,14 @@ __all__ = [
     "OptionGreeks",
     "PortfolioAnalytics",
     "PortfolioAnalyticsInputs",
+    "PortfolioMarketContext",
     "RATING_SCORES",
     "RebalanceComponent",
     "RebalanceProposal",
     "PortfolioReportPaths",
     "calculate_portfolio_analytics",
     "collect_portfolio_analytics_inputs",
+    "collect_portfolio_market_context",
     "default_portfolio_report_dir",
     "extract_holding_evidence_from_portfolio_result",
     "extract_ratings_from_portfolio_result",

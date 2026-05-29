@@ -14,6 +14,7 @@ def create_portfolio_risk_analyst(llm):
 
     def portfolio_risk_analyst_node(state) -> dict:
         analytics = state.get("portfolio_analytics")
+        market_context = state.get("portfolio_market_context")
         rebalance_proposal = state.get("rebalance_proposal")
         portfolio_request = state.get("portfolio_request")
         holdings = state.get("holdings", [])
@@ -34,6 +35,11 @@ Use the single-stock decisions and debate evidence to understand each holding's 
 {format_holding_evidence(holdings)}
 ```
 
+**Portfolio-Wide Market Context**
+```json
+{format_portfolio_payload(market_context)}
+```
+
 **Deterministic Portfolio Analytics**
 ```json
 {format_portfolio_payload(analytics)}
@@ -44,7 +50,7 @@ Use the single-stock decisions and debate evidence to understand each holding's 
 {format_portfolio_payload(rebalance_proposal)}
 ```
 
-Focus on allocation concentration, correlation, volatility, beta, cash, option exposure, aggregate Greeks, and constraint flags. End with practical risk controls for the portfolio-level manager.{get_language_instruction()}"""
+Use the portfolio-wide market context for broad US market, macro, benchmark, sentiment, and fundamental backdrop. Focus on allocation concentration, correlation, volatility, beta, cash, option exposure, aggregate Greeks, and constraint flags. End with practical risk controls for the portfolio-level manager.{get_language_instruction()}"""
 
         response = llm.invoke(prompt)
         risk_analysis = response.content

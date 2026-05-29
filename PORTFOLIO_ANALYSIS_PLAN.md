@@ -133,6 +133,7 @@ Suggested locations:
 - [x] Add a portfolio rebalancer prompt or node.
 - [x] Add a portfolio-level manager prompt or mode.
 - [x] Feed deterministic analytics and proposed target weights into the portfolio-level agents.
+- [x] Feed broad portfolio-wide market/news/sentiment/fundamental context into portfolio-level agents.
 - [x] Ensure the LLM explains and critiques deterministic metrics instead of inventing them.
 - [x] Preserve the current single-instrument portfolio manager behavior.
 
@@ -277,3 +278,4 @@ Use this section to record implementation milestones, decisions, and test result
 | 2026-05-28 | Optimizer/docs verified | Added opt-in mean-variance optimizer targets with bounds, turnover penalty, risk aversion, and diagnostics; added minimal two-stock smoke coverage, README portfolio-mode docs, and sample CSV/JSON portfolio files. Verified `uv run --with pytest python -m pytest`: 296 passed, 1 skipped. |
 | 2026-05-28 | Option failure handling verified | Made option data tools return an unavailable JSON payload instead of raising when yfinance chain/Greek data fails, and made portfolio propagation record failed holdings while continuing the rest of the portfolio. Verified `uv run --with pytest python -m pytest tests/test_options_dataflows.py tests/test_portfolio_graph.py tests/test_portfolio_smoke.py`: 13 passed. |
 | 2026-05-29 | Portfolio analytics input collection verified | Added best-effort collection of holding price history, configured benchmark history, and sector/industry labels before deterministic portfolio analytics. Option positions reuse underlying stock history for correlation/risk inputs, and unavailable provider data is recorded as a warning so analysis continues. Verified `uv run --with pytest python -m pytest`: 306 passed, 7 warnings. |
+| 2026-05-29 | Portfolio-wide market context verified | Added broad market context collection for portfolio-level agents, including global market news/sentiment, benchmark news, benchmark fundamentals where available, and benchmark technical indicators. Saved context to portfolio reports and kept all provider failures optional. Verified `uv run --with pytest python -m pytest tests/test_portfolio_market_context.py tests/test_portfolio_level_agents.py tests/test_portfolio_reports.py`: 11 passed. |

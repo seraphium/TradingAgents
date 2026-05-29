@@ -25,6 +25,7 @@ class PortfolioReportPaths:
     holdings_dir: Path
     portfolio_dir: Path
     analytics_json: Path | None = None
+    market_context_json: Path | None = None
     rebalance_json: Path | None = None
     rebalance_markdown: Path | None = None
     risk_markdown: Path | None = None
@@ -71,6 +72,15 @@ def save_portfolio_report_to_disk(
             encoding="utf-8",
         )
 
+    market_context_json = None
+    market_context = portfolio_state.get("portfolio_market_context")
+    if market_context is not None:
+        market_context_json = portfolio_dir / "market_context.json"
+        market_context_json.write_text(
+            json.dumps(_json_payload(market_context), indent=2, default=str),
+            encoding="utf-8",
+        )
+
     rebalance_json = None
     rebalance_markdown = None
     proposal = portfolio_state.get("rebalance_proposal")
@@ -114,6 +124,7 @@ def save_portfolio_report_to_disk(
         holdings_dir=holdings_dir,
         portfolio_dir=portfolio_dir,
         analytics_json=analytics_json,
+        market_context_json=market_context_json,
         rebalance_json=rebalance_json,
         rebalance_markdown=rebalance_markdown,
         risk_markdown=risk_markdown,
@@ -179,6 +190,8 @@ def render_complete_portfolio_report(portfolio_state: dict[str, Any]) -> str:
 
     if portfolio_state.get("portfolio_analytics"):
         sections.extend(["", "## Deterministic Portfolio Analytics", "See `portfolio/analytics.json`."])
+    if portfolio_state.get("portfolio_market_context"):
+        sections.extend(["", "## Portfolio-Wide Market Context", "See `portfolio/market_context.json`."])
     if portfolio_state.get("rebalance_proposal"):
         sections.extend(
             [
@@ -194,6 +207,12 @@ def render_complete_portfolio_report(portfolio_state: dict[str, Any]) -> str:
     if portfolio_state.get("final_portfolio_decision"):
         sections.extend(["", "## Final Portfolio Decision", portfolio_state["final_portfolio_decision"]])
     return "\n".join(sections)
+
+
+def _json_payload(value: Any) -> Any:
+    if hasattr(value, "to_dict") and callable(value.to_dict):
+        return value.to_dict()
+    return value
 
 
 def _write_optional_markdown(

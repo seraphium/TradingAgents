@@ -6,6 +6,7 @@ import pytest
 from tradingagents.portfolio import (
     AssetType,
     PortfolioInstrument,
+    PortfolioMarketContext,
     PortfolioPosition,
     PortfolioRequest,
     calculate_portfolio_analytics,
@@ -87,6 +88,10 @@ def portfolio_state() -> dict:
             },
         ],
         "portfolio_analytics": analytics,
+        "portfolio_market_context": PortfolioMarketContext(
+            benchmark_symbol="SPY",
+            global_news="Broad market news.",
+        ),
         "rebalance_proposal": proposal,
         "portfolio_risk_analysis": "Risk analysis.",
         "portfolio_rebalance_review": "Rebalance review.",
@@ -124,6 +129,7 @@ def test_render_complete_portfolio_report_assembles_all_sections():
     assert "# Portfolio Analysis Report" in markdown
     assert "## Holdings" in markdown
     assert "## Deterministic Portfolio Analytics" in markdown
+    assert "## Portfolio-Wide Market Context" in markdown
     assert "## Deterministic Rebalance Proposal" in markdown
     assert "## Portfolio Risk Analysis" in markdown
     assert "## Portfolio Rebalance Review" in markdown
@@ -143,6 +149,7 @@ def test_save_portfolio_report_to_disk_writes_phase_10_shape(tmp_path):
     assert (paths.holdings_dir / "MSFT.md").exists()
     assert (paths.holdings_dir / "CASH.md").exists()
     assert paths.analytics_json and paths.analytics_json.exists()
+    assert paths.market_context_json and paths.market_context_json.exists()
     assert paths.rebalance_json and paths.rebalance_json.exists()
     assert paths.rebalance_markdown and paths.rebalance_markdown.exists()
     assert paths.risk_markdown and paths.risk_markdown.exists()
@@ -150,5 +157,7 @@ def test_save_portfolio_report_to_disk_writes_phase_10_shape(tmp_path):
     assert paths.final_decision_markdown and paths.final_decision_markdown.exists()
 
     analytics = json.loads(paths.analytics_json.read_text(encoding="utf-8"))
+    market_context = json.loads(paths.market_context_json.read_text(encoding="utf-8"))
     assert analytics["weights_by_symbol"]["MSFT"] == pytest.approx(0.20)
+    assert market_context["benchmark_symbol"] == "SPY"
     assert "Final Portfolio Decision" in paths.complete_report.read_text(encoding="utf-8")

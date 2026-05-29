@@ -14,6 +14,7 @@ def create_portfolio_rebalancer(llm):
 
     def portfolio_rebalancer_node(state) -> dict:
         analytics = state.get("portfolio_analytics")
+        market_context = state.get("portfolio_market_context")
         rebalance_proposal = state.get("rebalance_proposal")
         portfolio_risk_analysis = state.get("portfolio_risk_analysis", "")
         holdings = state.get("holdings", [])
@@ -25,6 +26,11 @@ Use the supplied target weights and analytics as the numeric source of truth. Do
 **Single-Stock Decision Evidence**
 ```json
 {format_holding_evidence(holdings)}
+```
+
+**Portfolio-Wide Market Context**
+```json
+{format_portfolio_payload(market_context)}
 ```
 
 **Deterministic Portfolio Analytics**
@@ -40,7 +46,7 @@ Use the supplied target weights and analytics as the numeric source of truth. Do
 **Portfolio Risk Analyst Notes**
 {portfolio_risk_analysis}
 
-Return a concise Markdown rebalance review with a high-level portfolio thesis, portfolio-level tradeoffs, and any objections the final manager should consider. Avoid writing a separate rebalance reason for each stock unless a component creates a portfolio-level exception.{get_language_instruction()}"""
+Return a concise Markdown rebalance review with a high-level portfolio thesis, portfolio-level tradeoffs, and any objections the final manager should consider. Incorporate the broad market/news/sentiment/fundamental backdrop when it materially changes the risk budget or sector/theme exposure. Avoid writing a separate rebalance reason for each stock unless a component creates a portfolio-level exception.{get_language_instruction()}"""
 
         response = llm.invoke(prompt)
         rebalance_review = response.content

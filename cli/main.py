@@ -43,6 +43,7 @@ from tradingagents.portfolio import (
     PortfolioRequest,
     calculate_portfolio_analytics,
     collect_portfolio_analytics_inputs,
+    collect_portfolio_market_context,
     extract_ratings_from_portfolio_result,
     extract_holding_evidence_from_portfolio_result,
     generate_rebalance_proposal,
@@ -1594,6 +1595,13 @@ def run_portfolio_analysis(
         benchmark_prices=analytics_inputs.benchmark_prices,
         sector_by_symbol=analytics_inputs.sector_by_symbol,
     )
+    market_context = collect_portfolio_market_context(
+        portfolio_request,
+        benchmark_symbol=analytics_inputs.benchmark_symbol,
+        config=config,
+    )
+    for warning in market_context.warnings:
+        console.print(f"[yellow]Market context warning:[/yellow] {warning}")
 
     console.print("[bold]Stage 3/4:[/bold] Deterministic rebalancing")
     ratings = extract_ratings_from_portfolio_result(portfolio_result)
@@ -1608,6 +1616,7 @@ def run_portfolio_analysis(
         **portfolio_result,
         "portfolio_analytics": analytics,
         "portfolio_analytics_inputs": analytics_inputs,
+        "portfolio_market_context": market_context,
         "ratings_by_symbol": ratings,
         "rebalance_proposal": rebalance_proposal,
     }
