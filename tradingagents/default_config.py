@@ -17,6 +17,7 @@ _ENV_OVERRIDES = {
     "TRADINGAGENTS_MAX_RISK_ROUNDS":      "max_risk_discuss_rounds",
     "TRADINGAGENTS_CHECKPOINT_ENABLED":   "checkpoint_enabled",
     "TRADINGAGENTS_BENCHMARK_TICKER":     "benchmark_ticker",
+    "TRADINGAGENTS_ENABLE_REDDIT":         "enable_reddit_data",
 }
 
 
@@ -90,6 +91,12 @@ DEFAULT_CONFIG = _apply_env_overrides({
         "ECB Bank of England BOJ central bank policy",
         "oil commodities supply chain energy",
     ],
+    # Reddit's unauthenticated public JSON endpoints frequently return 403
+    # from hosted networks. Keep this opt-in so sentiment runs do not stall
+    # or spam warnings when Reddit blocks public scraping.
+    "enable_reddit_data": False,
+    "reddit_timeout": 3.0,
+    "reddit_limit_per_sub": 5,
     # Data vendor configuration
     # Category-level configuration (default for all tools in category)
     "data_vendors": {

@@ -68,6 +68,19 @@ def test_bool_coercion(monkeypatch, raw, expected):
     assert dc.DEFAULT_CONFIG["checkpoint_enabled"] is expected
 
 
+def test_reddit_data_is_disabled_by_default(monkeypatch):
+    dc = _reload_with_env(monkeypatch)
+
+    assert dc.DEFAULT_CONFIG["enable_reddit_data"] is False
+    assert dc.DEFAULT_CONFIG["reddit_timeout"] == 3.0
+
+
+def test_reddit_data_can_be_enabled_by_env(monkeypatch):
+    dc = _reload_with_env(monkeypatch, TRADINGAGENTS_ENABLE_REDDIT="true")
+
+    assert dc.DEFAULT_CONFIG["enable_reddit_data"] is True
+
+
 def test_empty_env_value_is_passthrough(monkeypatch):
     """Empty TRADINGAGENTS_* values must not clobber the built-in default."""
     dc = _reload_with_env(

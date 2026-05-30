@@ -2,8 +2,10 @@ from inspect import signature
 
 import pytest
 import typer
+from typer.testing import CliRunner
 
 from cli.main import (
+    app,
     analyze,
     load_portfolio_request_for_cli,
     parse_cli_float,
@@ -19,6 +21,8 @@ from tradingagents.portfolio import (
     calculate_portfolio_analytics,
     generate_rebalance_proposal,
 )
+
+runner = CliRunner()
 
 
 def stock_position(symbol: str, weight: float) -> PortfolioPosition:
@@ -78,6 +82,14 @@ def test_analyze_exposes_portfolio_file_option():
     assert "portfolio_file" in params
     assert "mode" in params
     assert "checkpoint" in params
+
+
+@pytest.mark.unit
+def test_analyze_is_registered_as_subcommand():
+    result = runner.invoke(app, ["analyze", "--help"])
+
+    assert result.exit_code == 0
+    assert "--portfolio-file" in result.output
 
 
 @pytest.mark.unit

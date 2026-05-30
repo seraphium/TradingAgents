@@ -11,6 +11,7 @@ from typing import Any
 from tradingagents.dataflows.utils import safe_ticker_component
 from tradingagents.portfolio.analytics import portfolio_analytics_to_dict
 from tradingagents.portfolio.rebalancing import (
+    extract_portfolio_allocation_summary,
     rebalance_proposal_to_dict,
     render_rebalance_proposal,
 )
@@ -92,7 +93,12 @@ def save_portfolio_report_to_disk(
         )
         rebalance_markdown = portfolio_dir / "rebalance.md"
         rebalance_markdown.write_text(
-            render_rebalance_proposal(proposal),
+            render_rebalance_proposal(
+                proposal,
+                final_summary=extract_portfolio_allocation_summary(
+                    portfolio_state.get("final_portfolio_decision")
+                ),
+            ),
             encoding="utf-8",
         )
 
@@ -197,7 +203,12 @@ def render_complete_portfolio_report(portfolio_state: dict[str, Any]) -> str:
             [
                 "",
                 "## Deterministic Rebalance Proposal",
-                render_rebalance_proposal(portfolio_state["rebalance_proposal"]),
+                render_rebalance_proposal(
+                    portfolio_state["rebalance_proposal"],
+                    final_summary=extract_portfolio_allocation_summary(
+                        portfolio_state.get("final_portfolio_decision")
+                    ),
+                ),
             ]
         )
     if portfolio_state.get("portfolio_risk_analysis"):

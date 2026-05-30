@@ -36,7 +36,7 @@ def _fetch_subreddit(
     sub: str,
     limit: int,
     timeout: float,
-) -> list[dict]:
+) -> list[dict] | None:
     qs = urlencode({
         "q": ticker,
         "restrict_sr": "on",
@@ -49,6 +49,12 @@ def _fetch_subreddit(
     try:
         with urlopen(req, timeout=timeout) as resp:
             payload = json.loads(resp.read())
+    except HTTPError as exc:
+        if exc.code == 403:
+            logger.debug("Reddit blocked public fetch for r/%s · %s", sub, ticker)
+            return None
+        logger.warning("Reddit fetch failed for r/%s · %s: %s", sub, ticker, exc)
+        return []
     except (HTTPError, URLError, json.JSONDecodeError, TimeoutError) as exc:
         logger.warning("Reddit fetch failed for r/%s · %s: %s", sub, ticker, exc)
         return []
@@ -75,6 +81,8 @@ def fetch_reddit_posts(
         if i > 0:
             time.sleep(inter_request_delay)
         posts = _fetch_subreddit(ticker, sub, limit_per_sub, timeout)
+        if posts is None:
+            return "<reddit unavailable: HTTP 403 blocked Reddit public search>"
         total_posts += len(posts)
         if not posts:
             blocks.append(f"r/{sub}: <no posts found mentioning {ticker.upper()} in the past 7 days>")

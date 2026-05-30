@@ -1,5 +1,7 @@
 import pytest
 
+import tradingagents.default_config as default_config
+from tradingagents.dataflows.config import set_config
 from tradingagents.portfolio import (
     AssetType,
     PortfolioConstraints,
@@ -7,6 +9,7 @@ from tradingagents.portfolio import (
     PortfolioPosition,
     PortfolioRequest,
     calculate_portfolio_analytics,
+    extract_portfolio_allocation_summary,
     extract_ratings_from_portfolio_result,
     generate_rebalance_proposal,
     render_rebalance_proposal,
@@ -391,3 +394,73 @@ def test_rebalance_reason_uses_portfolio_level_sector_and_theme_context():
     assert "Semiconductors 60.00%" in markdown
     assert "chip-related 60.00%" in markdown
     assert "Aggregate single-stock signals" in markdown
+
+
+@pytest.mark.unit
+def test_rebalance_proposal_rendering_uses_chinese_output_language():
+    try:
+        set_config({**default_config.DEFAULT_CONFIG, "output_language": "Chinese"})
+        request = PortfolioRequest(
+            positions=[
+                stock_position("AAPL", 0.35),
+                stock_position("MSFT", 0.35),
+                cash_position(0.30),
+            ],
+            trade_date="2026-05-27",
+        )
+        proposal = generate_rebalance_proposal(
+            request,
+            calculate_portfolio_analytics(request),
+            ratings_by_symbol={"AAPL": "Overweight", "MSFT": "Underweight"},
+        )
+
+        markdown = render_rebalance_proposal(proposal)
+
+        assert "**组合操作**：" in markdown
+        assert "**再平衡原因**：" in markdown
+        assert "汇总个股信号" in markdown
+        assert "Portfolio-level risk view" not in markdown
+        assert "Aggregate single-stock signals" not in markdown
+        assert "**Why Rebalance**:" not in markdown
+    finally:
+        set_config(default_config.DEFAULT_CONFIG)
+
+
+@pytest.mark.unit
+def test_rebalance_rendering_prefers_final_manager_summary():
+    request = PortfolioRequest(
+        positions=[
+            stock_position("AAPL", 0.35),
+            stock_position("MSFT", 0.35),
+            cash_position(0.30),
+        ],
+        trade_date="2026-05-27",
+    )
+    proposal = generate_rebalance_proposal(
+        request,
+        calculate_portfolio_analytics(request),
+        ratings_by_symbol={"AAPL": "Overweight", "MSFT": "Underweight"},
+    )
+
+    markdown = render_rebalance_proposal(
+        proposal,
+        final_summary="Use the final manager thesis as the concise rebalance reason.",
+    )
+
+    assert "**Why Rebalance**:\nUse the final manager thesis" in markdown
+    assert "**Deterministic Rebalance Basis**:" in markdown
+    assert proposal.rebalance_reason in markdown
+
+
+@pytest.mark.unit
+def test_extract_portfolio_allocation_summary_from_rendered_decision():
+    rendered = (
+        "**Portfolio Action**: Rebalance\n\n"
+        "**Summary**: 减少低确信度仓位，把资金转向更符合组合风险预算的持仓。\n\n"
+        "**Component Summary**:\n"
+        "- AAPL: ..."
+    )
+
+    assert extract_portfolio_allocation_summary(rendered) == (
+        "减少低确信度仓位，把资金转向更符合组合风险预算的持仓。"
+    )

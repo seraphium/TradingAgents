@@ -44,6 +44,7 @@ from tradingagents.portfolio import (
     calculate_portfolio_analytics,
     collect_portfolio_analytics_inputs,
     collect_portfolio_market_context,
+    extract_portfolio_allocation_summary,
     extract_ratings_from_portfolio_result,
     extract_holding_evidence_from_portfolio_result,
     generate_rebalance_proposal,
@@ -64,6 +65,11 @@ app = typer.Typer(
     help="TradingAgents CLI: Multi-Agents LLM Financial Trading Framework",
     add_completion=True,  # Enable shell completion
 )
+
+
+@app.callback()
+def main() -> None:
+    """TradingAgents command group."""
 
 
 # Create a deque to store recent messages with a maximum length
@@ -991,9 +997,17 @@ def display_portfolio_report(portfolio_state: dict) -> None:
     console.print()
     console.print(Rule("Portfolio Analysis Report", style="bold green"))
     if portfolio_state.get("rebalance_proposal"):
+        final_summary = extract_portfolio_allocation_summary(
+            portfolio_state.get("final_portfolio_decision")
+        )
         console.print(
             Panel(
-                Markdown(render_rebalance_proposal(portfolio_state["rebalance_proposal"])),
+                Markdown(
+                    render_rebalance_proposal(
+                        portfolio_state["rebalance_proposal"],
+                        final_summary=final_summary,
+                    )
+                ),
                 title="Deterministic Rebalance Proposal",
                 border_style="cyan",
                 padding=(1, 2),

@@ -9,9 +9,11 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
 from math import isfinite
+import re
 from typing import Any, Literal, Mapping
 
 from tradingagents.agents.utils.rating import parse_rating
+from tradingagents.dataflows.config import get_config
 from tradingagents.portfolio.analytics import PortfolioAnalytics
 from tradingagents.portfolio.schemas import AssetType, PortfolioRequest
 
@@ -223,14 +225,25 @@ def extract_holding_evidence_from_portfolio_result(
     return list(portfolio_result.get("holdings", []))
 
 
-def render_rebalance_proposal(proposal: RebalanceProposal) -> str:
+def render_rebalance_proposal(
+    proposal: RebalanceProposal,
+    *,
+    final_summary: str | None = None,
+) -> str:
     """Render a deterministic rebalance proposal to Markdown."""
+
+    if _render_language() == "Chinese":
+        return _render_rebalance_proposal_zh(proposal, final_summary=final_summary)
 
     parts = [
         f"**Portfolio Action**: {proposal.portfolio_action}",
         "",
         "**Why Rebalance**:",
-        proposal.rebalance_reason,
+        final_summary or proposal.rebalance_reason,
+    ]
+    if final_summary and proposal.rebalance_reason:
+        parts.extend(["", "**Deterministic Rebalance Basis**:", proposal.rebalance_reason])
+    parts.extend([
         "",
         "**Component Summary**:",
         *[
@@ -240,7 +253,7 @@ def render_rebalance_proposal(proposal: RebalanceProposal) -> str:
         "",
         "| Symbol | Current Weight | Target Weight | Change | Action | Rating | Score | Rationale |",
         "| --- | ---: | ---: | ---: | --- | --- | ---: | --- |",
-    ]
+    ])
     for component in proposal.component_proposals:
         parts.append(
             "| "
@@ -262,6 +275,70 @@ def render_rebalance_proposal(proposal: RebalanceProposal) -> str:
         parts.extend(["", "**Risk Notes**:"])
         parts.extend(f"- {note}" for note in proposal.risk_notes)
     return "\n".join(parts)
+
+
+def _render_rebalance_proposal_zh(
+    proposal: RebalanceProposal,
+    *,
+    final_summary: str | None = None,
+) -> str:
+    parts = [
+        f"**组合操作**：{_localize_action(proposal.portfolio_action)}",
+        "",
+        "**再平衡原因**：",
+        final_summary or _localize_rebalance_text(proposal.rebalance_reason),
+    ]
+    if final_summary and proposal.rebalance_reason:
+        parts.extend(["", "**量化再平衡依据**：", _localize_rebalance_text(proposal.rebalance_reason)])
+    parts.extend([
+        "",
+        "**成分摘要**：",
+        *[
+            f"- {component.symbol}: {_component_rebalance_summary(component, localize=True)}"
+            for component in proposal.component_proposals
+        ],
+        "",
+        "| 标的 | 当前权重 | 目标权重 | 变化 | 操作 | 评级 | 分数 | 依据 |",
+        "| --- | ---: | ---: | ---: | --- | --- | ---: | --- |",
+    ])
+    for component in proposal.component_proposals:
+        parts.append(
+            "| "
+            + " | ".join(
+                [
+                    _escape_cell(component.symbol),
+                    _format_weight(component.current_weight),
+                    _format_weight(component.target_weight),
+                    _format_signed_weight(component.weight_change),
+                    _localize_action(component.action),
+                    _localize_rating(component.rating),
+                    f"{component.score:+.2f}",
+                    _escape_cell(_localize_rebalance_text(component.rationale)),
+                ]
+            )
+            + " |"
+        )
+    if proposal.risk_notes:
+        parts.extend(["", "**风险提示**："])
+        parts.extend(f"- {_localize_rebalance_text(note)}" for note in proposal.risk_notes)
+    return "\n".join(parts)
+
+
+def extract_portfolio_allocation_summary(final_decision: Any) -> str:
+    """Extract the portfolio-level summary from a rendered manager decision."""
+
+    if final_decision is None:
+        return ""
+    text = str(final_decision).strip()
+    if not text:
+        return ""
+    match = re.search(
+        r"(?ims)^\s*\*\*Summary\*\*\s*:\s*(.+?)(?=^\s*\*\*|\Z)",
+        text,
+    )
+    if match:
+        return " ".join(match.group(1).strip().split())
+    return " ".join(text.split())
 
 
 def rebalance_proposal_to_dict(proposal: RebalanceProposal) -> dict[str, Any]:
@@ -1129,13 +1206,127 @@ def _aggregate_signal_context(components: list[RebalanceComponent]) -> str:
     )
 
 
-def _component_rebalance_summary(component: RebalanceComponent) -> str:
+def _component_rebalance_summary(
+    component: RebalanceComponent,
+    *,
+    localize: bool = False,
+) -> str:
+    if localize:
+        return (
+            f"{_localize_action(component.action)}："
+            f"{_format_weight(component.current_weight)} -> "
+            f"{_format_weight(component.target_weight)} "
+            f"({_format_signed_weight(component.weight_change)})；"
+            f"{_localize_rebalance_text(component.single_stock_summary)}"
+        )
     return (
         f"{component.action} from {_format_weight(component.current_weight)} "
         f"to {_format_weight(component.target_weight)} "
         f"({_format_signed_weight(component.weight_change)}); "
         f"{component.single_stock_summary}"
     )
+
+
+def _render_language() -> str:
+    return str(get_config().get("output_language", "English")).strip()
+
+
+def _localize_action(action: str) -> str:
+    return {
+        "Buy": "买入",
+        "Sell": "卖出",
+        "Add": "增持",
+        "Trim": "减持",
+        "Hold": "持有",
+        "Rebalance": "再平衡",
+        "De-risk": "降低风险",
+        "Increase Risk": "提高风险",
+    }.get(action, action)
+
+
+def _localize_rating(rating: str) -> str:
+    return {
+        "Buy": "买入",
+        "Overweight": "超配",
+        "Hold": "持有",
+        "Underweight": "低配",
+        "Sell": "卖出",
+    }.get(rating, rating)
+
+
+def _localize_rebalance_text(text: str) -> str:
+    replacements = [
+        (
+            "All components remain within tolerance, so no material allocation change is proposed.",
+            "所有成分仍在容忍区间内，因此不建议进行实质性配置调整。",
+        ),
+        ("Portfolio-level risk view: ", "组合层面风险视角："),
+        ("total volatility is ", "总波动率为 "),
+        (", above the configured ", "，高于设定的 "),
+        (", inside the configured ", "，处于设定的 "),
+        (" budget.", " 风险预算内。"),
+        ("sector exposure is concentrated in ", "行业敞口集中在 "),
+        (" exposure is concentrated in ", " 敞口集中在 "),
+        ("options exposure is ", "期权敞口为 "),
+        ("aggregate option Greeks are ", "汇总期权 Greeks 为 "),
+        ("Risk flags: ", "风险标记："),
+        ("Aggregate single-stock signals are ", "汇总个股信号为 "),
+        (" positive, ", " 个正面、"),
+        (" neutral, and ", " 个中性、"),
+        (
+            " negative; the proposed trade set adds ",
+            " 个负面；拟议交易组合向选定风险资产增加 ",
+        ),
+        (
+            " to selected risky assets and trims ",
+            "，并从风险较高或低确信度仓位削减 ",
+        ),
+        (" from riskier or lower-conviction sleeves.", "。"),
+        (
+            "The optimizer reduces the sleeves that add the most unwanted risk or have weaker aggregate conviction.",
+            "优化器会降低带来较多非预期风险或整体确信度较弱的仓位。",
+        ),
+        (
+            "Freed capital is redeployed into components that better fit the portfolio risk budget and single-stock conviction set.",
+            "释放出的资金会重新配置到更符合组合风险预算和个股确信度的成分。",
+        ),
+        (
+            "Cash is adjusted as the funding and liquidity reserve after the risky-asset targets are set.",
+            "在风险资产目标确定后，现金作为资金来源和流动性储备进行调整。",
+        ),
+        (
+            "Cash sleeve is treated as portfolio funding and liquidity reserve.",
+            "现金仓位被视为组合资金来源和流动性储备。",
+        ),
+        ("Parsed single-stock rating ", "解析出的个股评级为 "),
+        (" contributes optimizer score ", "，贡献优化器分数 "),
+        ("Target set by mean-variance optimizer.", "目标权重由均值-方差优化器设定。"),
+        ("Risk adjustment ", "风险调整 "),
+        ("Applied constraints: ", "已应用约束："),
+        (
+            "Cash is not single-stock analyzed; it is adjusted as portfolio liquidity and risk reserve.",
+            "现金不进行个股分析；它作为组合流动性和风险储备进行调整。",
+        ),
+        (
+            "No detailed single-stock conclusion was supplied; parsed holding rating is ",
+            "未提供详细个股结论；解析出的持仓评级为 ",
+        ),
+        (
+            "Single-stock analysis failed for this component: ",
+            "该成分的个股分析失败：",
+        ),
+        ("Single-stock final conclusion: ", "个股最终结论："),
+        ("Trader plan: ", "交易员计划："),
+        ("Risk debate conclusion: ", "风险辩论结论："),
+        (
+            "Single-stock analysis completed; parsed holding rating is ",
+            "个股分析已完成；解析出的持仓评级为 ",
+        ),
+    ]
+    localized = text
+    for source, target in replacements:
+        localized = localized.replace(source, target)
+    return localized
 
 
 def _action_for_change(current_weight: float, target_weight: float, tolerance: float) -> str:
