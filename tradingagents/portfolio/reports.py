@@ -167,9 +167,13 @@ def render_holding_report(holding: dict[str, Any]) -> str:
                 if report:
                     parts.extend(["", f"### {name.title()}", str(report)])
         if analysis.get("trader_investment_plan"):
-            parts.extend(["", "## Trader Plan", str(analysis["trader_investment_plan"])])
+            parts.extend(
+                ["", "## Trader Plan", str(analysis["trader_investment_plan"])]
+            )
         if analysis.get("final_trade_decision"):
-            parts.extend(["", "## Final Decision", str(analysis["final_trade_decision"])])
+            parts.extend(
+                ["", "## Final Decision", str(analysis["final_trade_decision"])]
+            )
 
     return "\n".join(parts)
 
@@ -195,9 +199,21 @@ def render_complete_portfolio_report(portfolio_state: dict[str, Any]) -> str:
         )
 
     if portfolio_state.get("portfolio_analytics"):
-        sections.extend(["", "## Deterministic Portfolio Analytics", "See `portfolio/analytics.json`."])
+        sections.extend(
+            [
+                "",
+                "## Deterministic Portfolio Analytics",
+                "See `portfolio/analytics.json`.",
+            ]
+        )
     if portfolio_state.get("portfolio_market_context"):
-        sections.extend(["", "## Portfolio-Wide Market Context", "See `portfolio/market_context.json`."])
+        sections.extend(
+            [
+                "",
+                "## Portfolio-Wide Market Context",
+                "See `portfolio/market_context.json`.",
+            ]
+        )
     if portfolio_state.get("rebalance_proposal"):
         sections.extend(
             [
@@ -212,11 +228,29 @@ def render_complete_portfolio_report(portfolio_state: dict[str, Any]) -> str:
             ]
         )
     if portfolio_state.get("portfolio_risk_analysis"):
-        sections.extend(["", "## Portfolio Risk Analysis", portfolio_state["portfolio_risk_analysis"]])
+        sections.extend(
+            [
+                "",
+                "## Portfolio Risk Analysis (Risk Controller)",
+                portfolio_state["portfolio_risk_analysis"],
+            ]
+        )
     if portfolio_state.get("portfolio_rebalance_review"):
-        sections.extend(["", "## Portfolio Rebalance Review", portfolio_state["portfolio_rebalance_review"]])
+        sections.extend(
+            [
+                "",
+                "## Portfolio Rebalance Review (Allocation Proposal Reviewer)",
+                portfolio_state["portfolio_rebalance_review"],
+            ]
+        )
     if portfolio_state.get("final_portfolio_decision"):
-        sections.extend(["", "## Final Portfolio Decision", portfolio_state["final_portfolio_decision"]])
+        sections.extend(
+            [
+                "",
+                "## Final Portfolio Decision (Portfolio Decision Approver)",
+                portfolio_state["final_portfolio_decision"],
+            ]
+        )
     return "\n".join(sections)
 
 

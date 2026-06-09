@@ -42,6 +42,11 @@ from tradingagents.portfolio.rebalancing import (
     rebalance_proposal_to_dict,
     render_rebalance_proposal,
 )
+from tradingagents.portfolio.workflow import (
+    PortfolioWorkflowEvent,
+    PortfolioWorkflowState,
+    run_portfolio_workflow,
+)
 from tradingagents.portfolio.reports import (
     PortfolioReportPaths,
     default_portfolio_report_dir,
@@ -67,6 +72,8 @@ __all__ = [
     "RebalanceComponent",
     "RebalanceProposal",
     "PortfolioReportPaths",
+    "PortfolioWorkflowEvent",
+    "PortfolioWorkflowState",
     "calculate_portfolio_analytics",
     "collect_portfolio_analytics_inputs",
     "collect_portfolio_market_context",
@@ -85,5 +92,6 @@ __all__ = [
     "render_complete_portfolio_report",
     "render_holding_report",
     "render_rebalance_proposal",
+    "run_portfolio_workflow",
     "save_portfolio_report_to_disk",
 ]

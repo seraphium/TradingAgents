@@ -28,30 +28,18 @@ from tradingagents.graph.analyst_execution import (
     sync_analyst_tracker_from_chunk,
 )
 from tradingagents.default_config import DEFAULT_CONFIG
-from tradingagents.agents.managers.portfolio_manager import (
-    create_portfolio_allocation_manager,
-)
-from tradingagents.agents.managers.portfolio_rebalancer import create_portfolio_rebalancer
-from tradingagents.agents.risk_mgmt.portfolio_risk_analyst import (
-    create_portfolio_risk_analyst,
-)
 from tradingagents.portfolio import (
     AssetType as PortfolioAssetType,
     PortfolioInstrument,
     PortfolioParseError,
     PortfolioPosition,
     PortfolioRequest,
-    calculate_portfolio_analytics,
-    collect_portfolio_analytics_inputs,
-    collect_portfolio_market_context,
     extract_portfolio_allocation_summary,
-    extract_ratings_from_portfolio_result,
-    extract_holding_evidence_from_portfolio_result,
-    generate_rebalance_proposal,
     load_portfolio_file,
     default_portfolio_report_dir,
     save_portfolio_report_to_disk,
     render_rebalance_proposal,
+    run_portfolio_workflow,
 )
 from cli.models import AnalystType
 from cli.utils import *
@@ -1017,7 +1005,7 @@ def display_portfolio_report(portfolio_state: dict) -> None:
         console.print(
             Panel(
                 Markdown(portfolio_state["portfolio_risk_analysis"]),
-                title="Portfolio Risk Analyst",
+                title="Portfolio Risk Controller",
                 border_style="red",
                 padding=(1, 2),
             )
@@ -1026,7 +1014,7 @@ def display_portfolio_report(portfolio_state: dict) -> None:
         console.print(
             Panel(
                 Markdown(portfolio_state["portfolio_rebalance_review"]),
-                title="Portfolio Rebalancer",
+                title="Allocation Proposal Reviewer",
                 border_style="yellow",
                 padding=(1, 2),
             )
@@ -1035,7 +1023,7 @@ def display_portfolio_report(portfolio_state: dict) -> None:
         console.print(
             Panel(
                 Markdown(portfolio_state["final_portfolio_decision"]),
-                title="Portfolio Allocation Manager",
+                title="Portfolio Decision Approver",
                 border_style="green",
                 padding=(1, 2),
             )
@@ -1554,95 +1542,55 @@ def run_portfolio_analysis(
     selected_analyst_keys: list[str],
     stats_handler: StatsCallbackHandler,
 ) -> dict:
-    """Run portfolio analysis from a validated PortfolioRequest."""
+    """Run portfolio analysis and handle CLI-only presentation and persistence."""
 
     portfolio_request = selections["portfolio_request"]
     if portfolio_request is None:
         raise typer.BadParameter("portfolio mode requires a portfolio request")
 
-    graph = TradingAgentsGraph(
-        selected_analyst_keys,
-        config=config,
-        debug=False,
-        callbacks=[stats_handler],
-    )
-
     console.print(Rule("Portfolio Analysis", style="bold cyan"))
 
-    def progress(event: str, payload: dict) -> None:
-        if event == "holding_started":
+    stage_labels = {
+        "instrument_analysis": "Instrument analysis",
+        "portfolio_analytics": "Deterministic portfolio analytics",
+        "deterministic_rebalance": "Deterministic rebalancing",
+        "portfolio_review": "Portfolio-level review and approval",
+    }
+    stage_numbers = {stage: index for index, stage in enumerate(stage_labels, start=1)}
+
+    def progress(event: dict) -> None:
+        name = event["name"]
+        stage = event["stage"]
+        payload = event["payload"]
+        if name == "stage_started":
+            console.print(
+                f"[bold]Stage {stage_numbers[stage]}/4:[/bold] {stage_labels[stage]}"
+            )
+        elif name == "holding_started":
             console.print(
                 f"[cyan]Holding:[/cyan] {payload['symbol']} "
                 f"({payload['asset_type']}, {payload['weight']:.2%})"
             )
-        elif event == "holding_completed":
+        elif name == "holding_completed":
             console.print(
                 f"[green]Completed:[/green] {payload['symbol']} "
                 f"[dim]{payload['status']}[/dim]"
             )
-        elif event == "portfolio_started":
-            console.print(
-                f"[bold]Stage 1/4:[/bold] Single-instrument analysis "
-                f"for {payload['positions']} positions"
+        elif name == "warning":
+            label = (
+                "Market context warning"
+                if payload["source"] == "market_context"
+                else "Data warning"
             )
-        elif event == "portfolio_completed":
-            console.print(
-                f"[green]Stage 1 complete:[/green] {payload['holdings']} holdings, "
-                f"{payload['analyses']} analyses"
-            )
+            console.print(f"[yellow]{label}:[/yellow] {payload['message']}")
 
-    portfolio_result = graph.propagate_portfolio(
+    portfolio_state = run_portfolio_workflow(
         portfolio_request,
+        selected_analysts=selected_analyst_keys,
+        config=config,
+        callbacks=[stats_handler],
         progress_callback=progress,
     )
-
-    console.print("[bold]Stage 2/4:[/bold] Deterministic portfolio analytics")
-    analytics_inputs = collect_portfolio_analytics_inputs(
-        portfolio_request,
-        config=config,
-    )
-    for warning in analytics_inputs.warnings:
-        console.print(f"[yellow]Data warning:[/yellow] {warning}")
-    analytics = calculate_portfolio_analytics(
-        portfolio_request,
-        historical_prices=analytics_inputs.historical_prices,
-        benchmark_prices=analytics_inputs.benchmark_prices,
-        sector_by_symbol=analytics_inputs.sector_by_symbol,
-    )
-    market_context = collect_portfolio_market_context(
-        portfolio_request,
-        benchmark_symbol=analytics_inputs.benchmark_symbol,
-        config=config,
-    )
-    for warning in market_context.warnings:
-        console.print(f"[yellow]Market context warning:[/yellow] {warning}")
-
-    console.print("[bold]Stage 3/4:[/bold] Deterministic rebalancing")
-    ratings = extract_ratings_from_portfolio_result(portfolio_result)
-    rebalance_proposal = generate_rebalance_proposal(
-        portfolio_request,
-        analytics,
-        ratings_by_symbol=ratings,
-        holdings=extract_holding_evidence_from_portfolio_result(portfolio_result),
-    )
-
-    portfolio_state = {
-        **portfolio_result,
-        "portfolio_analytics": analytics,
-        "portfolio_analytics_inputs": analytics_inputs,
-        "portfolio_market_context": market_context,
-        "ratings_by_symbol": ratings,
-        "rebalance_proposal": rebalance_proposal,
-    }
-
-    console.print("[bold]Stage 4/4:[/bold] Portfolio-level agent review")
-    risk_node = create_portfolio_risk_analyst(graph.deep_thinking_llm)
-    rebalance_node = create_portfolio_rebalancer(graph.deep_thinking_llm)
-    manager_node = create_portfolio_allocation_manager(graph.deep_thinking_llm)
-
-    portfolio_state.update(risk_node(portfolio_state))
-    portfolio_state.update(rebalance_node(portfolio_state))
-    portfolio_state.update(manager_node(portfolio_state))
 
     console.print("\n[bold cyan]Portfolio Analysis Complete![/bold cyan]\n")
 
