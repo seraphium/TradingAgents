@@ -1,5 +1,7 @@
 # Portfolio Analysis Enhancement Plan
 
+> This document records the completed first-generation portfolio implementation plan. For the next-generation workflow that combines structured instrument proposals, market regime, portfolio risk, deterministic re-optimization, approval, and decision-first reporting, see [`PORTFOLIO_REBALANCE_WORKFLOW_PLAN.md`](PORTFOLIO_REBALANCE_WORKFLOW_PLAN.md).
+
 This file tracks the work to extend TradingAgents from single-instrument analysis to whole-portfolio analysis across multiple stocks and options. The goal is to produce portfolio-level recommendations that explain whether to buy, sell, trim, add, or hold each component and how target weights should change.
 
 ## Progress Legend
