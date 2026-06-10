@@ -297,3 +297,33 @@ Please reference our work if you find *TradingAgents* provides you with some hel
       url={https://arxiv.org/abs/2412.20138}, 
 }
 ```
+
+## Decision-First Portfolio Reports
+
+Portfolio-mode runs present the executable decision before detailed agent narratives. The CLI and
+`complete_report.md` begin with the approval status, portfolio action, market regime, data-quality
+status, and an exact current-to-target allocation table. They then summarize market impact,
+portfolio risk, each instrument's initial view versus final action, and proposal-version history.
+Verbose risk-controller, reviewer, and approver narratives remain available in the report appendix.
+
+Each saved portfolio run uses this audit-friendly shape:
+
+```text
+reports/portfolio_<timestamp>/
+  complete_report.md
+  final_result.json
+  holdings/
+  portfolio/
+    analytics.json
+    market_regime.json
+    data_quality.json
+    proposals/
+      proposal_v1.json
+      proposal_v2.json  # present only after a bounded re-optimization
+    risk_validation.json
+    proposal_review.json
+    approval.json
+```
+
+`final_result.json` is the machine-readable decision surface. It contains the final action, decision
+summary, market and data-quality context, exact final allocations, warnings, and proposal history.
