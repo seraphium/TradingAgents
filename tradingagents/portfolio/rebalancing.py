@@ -10,12 +10,16 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass, field
 from math import isfinite
 import re
-from typing import Any, Literal, Mapping
+from typing import TYPE_CHECKING, Any, Literal, Mapping
 
 from tradingagents.agents.utils.rating import parse_rating
 from tradingagents.dataflows.config import get_config
 from tradingagents.portfolio.analytics import PortfolioAnalytics
 from tradingagents.portfolio.schemas import AssetType, PortfolioRequest
+
+if TYPE_CHECKING:
+    from tradingagents.portfolio.data_quality import DataQualityAssessment
+    from tradingagents.portfolio.instrument_proposals import InstrumentProposal
 
 
 RATING_SCORES: dict[str, float] = {
@@ -65,6 +69,8 @@ def generate_rebalance_proposal(
     analytics: PortfolioAnalytics,
     *,
     ratings_by_symbol: Mapping[str, str] | None = None,
+    instrument_proposals: Mapping[str, "InstrumentProposal"] | None = None,
+    data_quality: "DataQualityAssessment" | None = None,
     liquidity_by_symbol: Mapping[str, float] | None = None,
     holdings: list[Mapping[str, Any]] | None = None,
     optimizer: Literal["heuristic", "mean_variance"] | None = None,
@@ -79,9 +85,20 @@ def generate_rebalance_proposal(
     """
 
     ratings = ratings_by_symbol or {}
+    structured_proposals = instrument_proposals or {}
     liquidity = liquidity_by_symbol or {}
     holding_evidence = _holding_evidence_by_symbol(holdings or [])
     bounds = _component_bounds(portfolio_request)
+    if data_quality is not None:
+        for symbol in data_quality.restricted_symbols:
+            if symbol in bounds:
+                minimum, maximum = bounds[symbol]
+                current = next(
+                    float(position.current_weight)
+                    for position in portfolio_request.positions
+                    if position.instrument.symbol == symbol
+                )
+                bounds[symbol] = (min(minimum, current), min(maximum, current))
     positions_by_symbol = {
         position.instrument.symbol: position for position in portfolio_request.positions
     }
@@ -90,7 +107,11 @@ def generate_rebalance_proposal(
         for symbol, position in positions_by_symbol.items()
     }
     scores = {
-        symbol: _score_for_symbol(symbol, ratings)
+        symbol: (
+            structured_proposals[symbol].allocation_score
+            if symbol in structured_proposals
+            else _score_for_symbol(symbol, ratings)
+        )
         for symbol in positions_by_symbol
     }
     risk_adjustments, risk_notes = _risk_adjustments(
@@ -105,9 +126,19 @@ def generate_rebalance_proposal(
         "score_step": score_step,
         "change_tolerance": change_tolerance,
         "optimizer": optimizer_mode,
+        "instrument_proposal_sources": {
+            symbol: proposal.source for symbol, proposal in structured_proposals.items()
+        },
+        "data_quality_status": (
+            data_quality.status if data_quality is not None else None
+        ),
     }
     targets = dict(current_weights)
     constraints_applied = {symbol: [] for symbol in positions_by_symbol}
+    if data_quality is not None:
+        for symbol in data_quality.restricted_symbols:
+            if symbol in constraints_applied:
+                constraints_applied[symbol].append("data_quality_no_increase")
     if optimizer_mode == "mean_variance":
         targets, optimizer_diagnostics = _mean_variance_targets(
             portfolio_request,
@@ -125,15 +156,23 @@ def generate_rebalance_proposal(
         for symbol, position in positions_by_symbol.items():
             if position.instrument.asset_type == AssetType.CASH:
                 continue
-            adjustment = (scores[symbol] + risk_adjustments.get(symbol, 0.0)) * score_step
+            adjustment = (
+                scores[symbol] + risk_adjustments.get(symbol, 0.0)
+            ) * score_step
             unclamped = targets[symbol] + adjustment
             targets[symbol] = _clamp(unclamped, *bounds[symbol])
             if targets[symbol] != unclamped:
                 constraints_applied[symbol].append("component_bounds")
 
-    targets = _apply_option_limit(portfolio_request, targets, bounds, constraints_applied)
-    targets = _apply_cash_budget(portfolio_request, analytics, targets, bounds, constraints_applied)
-    targets = _normalize_targets(targets, bounds, scores, portfolio_request, constraints_applied)
+    targets = _apply_option_limit(
+        portfolio_request, targets, bounds, constraints_applied
+    )
+    targets = _apply_cash_budget(
+        portfolio_request, analytics, targets, bounds, constraints_applied
+    )
+    targets = _normalize_targets(
+        targets, bounds, scores, portfolio_request, constraints_applied
+    )
 
     components: list[RebalanceComponent] = []
     for symbol, position in positions_by_symbol.items():
@@ -141,19 +180,27 @@ def generate_rebalance_proposal(
         target_weight = _round_weight(targets[symbol])
         weight_change = _round_weight(target_weight - current_weight)
         action = _action_for_change(current_weight, target_weight, change_tolerance)
-        rating = _rating_for_symbol(symbol, ratings)
+        rating = (
+            structured_proposals[symbol].rating
+            if symbol in structured_proposals
+            else _rating_for_symbol(symbol, ratings)
+        )
         if position.instrument.asset_type == AssetType.CASH:
-            rationale_parts = ["Cash sleeve is treated as portfolio funding and liquidity reserve."]
+            rationale_parts = [
+                "Cash sleeve is treated as portfolio funding and liquidity reserve."
+            ]
         else:
             rationale_parts = [
-                f"Parsed single-stock rating {rating} contributes optimizer score {scores[symbol]:+.2f}."
+                f"Instrument proposal rating {rating} contributes confidence-weighted optimizer score {scores[symbol]:+.2f}."
             ]
         if optimizer_mode == "mean_variance":
             rationale_parts.append("Target set by mean-variance optimizer.")
         if risk_adjustments.get(symbol):
             rationale_parts.append(f"Risk adjustment {risk_adjustments[symbol]:+.2f}.")
         if constraints_applied[symbol]:
-            rationale_parts.append("Applied constraints: " + ", ".join(constraints_applied[symbol]) + ".")
+            rationale_parts.append(
+                "Applied constraints: " + ", ".join(constraints_applied[symbol]) + "."
+            )
         single_stock_summary = _single_stock_summary(
             symbol,
             position.instrument.asset_type,
@@ -199,11 +246,16 @@ def generate_rebalance_proposal(
         score_by_symbol=scores,
         risk_notes=risk_notes,
         rebalance_reason=rebalance_reason,
-        diagnostics={**diagnostics, "target_sum": sum(target_weights_by_symbol.values())},
+        diagnostics={
+            **diagnostics,
+            "target_sum": sum(target_weights_by_symbol.values()),
+        },
     )
 
 
-def extract_ratings_from_portfolio_result(portfolio_result: Mapping[str, Any]) -> dict[str, str]:
+def extract_ratings_from_portfolio_result(
+    portfolio_result: Mapping[str, Any],
+) -> dict[str, str]:
     """Extract per-holding ratings from a ``propagate_portfolio`` result."""
 
     ratings: dict[str, str] = {}
@@ -242,18 +294,22 @@ def render_rebalance_proposal(
         final_summary or proposal.rebalance_reason,
     ]
     if final_summary and proposal.rebalance_reason:
-        parts.extend(["", "**Deterministic Rebalance Basis**:", proposal.rebalance_reason])
-    parts.extend([
-        "",
-        "**Component Summary**:",
-        *[
-            f"- {component.symbol}: {_component_rebalance_summary(component)}"
-            for component in proposal.component_proposals
-        ],
-        "",
-        "| Symbol | Current Weight | Target Weight | Change | Action | Rating | Score | Rationale |",
-        "| --- | ---: | ---: | ---: | --- | --- | ---: | --- |",
-    ])
+        parts.extend(
+            ["", "**Deterministic Rebalance Basis**:", proposal.rebalance_reason]
+        )
+    parts.extend(
+        [
+            "",
+            "**Component Summary**:",
+            *[
+                f"- {component.symbol}: {_component_rebalance_summary(component)}"
+                for component in proposal.component_proposals
+            ],
+            "",
+            "| Symbol | Current Weight | Target Weight | Change | Action | Rating | Score | Rationale |",
+            "| --- | ---: | ---: | ---: | --- | --- | ---: | --- |",
+        ]
+    )
     for component in proposal.component_proposals:
         parts.append(
             "| "
@@ -289,18 +345,26 @@ def _render_rebalance_proposal_zh(
         final_summary or _localize_rebalance_text(proposal.rebalance_reason),
     ]
     if final_summary and proposal.rebalance_reason:
-        parts.extend(["", "**量化再平衡依据**：", _localize_rebalance_text(proposal.rebalance_reason)])
-    parts.extend([
-        "",
-        "**成分摘要**：",
-        *[
-            f"- {component.symbol}: {_component_rebalance_summary(component, localize=True)}"
-            for component in proposal.component_proposals
-        ],
-        "",
-        "| 标的 | 当前权重 | 目标权重 | 变化 | 操作 | 评级 | 分数 | 依据 |",
-        "| --- | ---: | ---: | ---: | --- | --- | ---: | --- |",
-    ])
+        parts.extend(
+            [
+                "",
+                "**量化再平衡依据**：",
+                _localize_rebalance_text(proposal.rebalance_reason),
+            ]
+        )
+    parts.extend(
+        [
+            "",
+            "**成分摘要**：",
+            *[
+                f"- {component.symbol}: {_component_rebalance_summary(component, localize=True)}"
+                for component in proposal.component_proposals
+            ],
+            "",
+            "| 标的 | 当前权重 | 目标权重 | 变化 | 操作 | 评级 | 分数 | 依据 |",
+            "| --- | ---: | ---: | ---: | --- | --- | ---: | --- |",
+        ]
+    )
     for component in proposal.component_proposals:
         parts.append(
             "| "
@@ -320,7 +384,9 @@ def _render_rebalance_proposal_zh(
         )
     if proposal.risk_notes:
         parts.extend(["", "**风险提示**："])
-        parts.extend(f"- {_localize_rebalance_text(note)}" for note in proposal.risk_notes)
+        parts.extend(
+            f"- {_localize_rebalance_text(note)}" for note in proposal.risk_notes
+        )
     return "\n".join(parts)
 
 
@@ -377,8 +443,12 @@ def _single_stock_summary(
         return f"No detailed single-stock conclusion was supplied; parsed holding rating is {rating}."
 
     if holding.get("analysis_status") == "failed":
-        error = holding.get("error") or holding.get("skip_reason") or "analysis unavailable"
-        return f"Single-stock analysis failed for this component: {_truncate_text(error)}"
+        error = (
+            holding.get("error") or holding.get("skip_reason") or "analysis unavailable"
+        )
+        return (
+            f"Single-stock analysis failed for this component: {_truncate_text(error)}"
+        )
 
     analysis = holding.get("analysis") or {}
     final_decision = _clean_decision_text(analysis.get("final_trade_decision"))
@@ -420,13 +490,23 @@ def _truncate_text(value: Any, limit: int = 360) -> str:
     return text[: max(limit - 15, 0)].rstrip() + "... [truncated]"
 
 
-def _component_bounds(portfolio_request: PortfolioRequest) -> dict[str, tuple[float, float]]:
+def _component_bounds(
+    portfolio_request: PortfolioRequest,
+) -> dict[str, tuple[float, float]]:
     bounds: dict[str, tuple[float, float]] = {}
     constraints = portfolio_request.constraints
     for position in portfolio_request.positions:
         symbol = position.instrument.symbol
-        minimum = position.target_min_weight if position.target_min_weight is not None else 0.0
-        maximum = position.target_max_weight if position.target_max_weight is not None else 1.0
+        minimum = (
+            position.target_min_weight
+            if position.target_min_weight is not None
+            else 0.0
+        )
+        maximum = (
+            position.target_max_weight
+            if position.target_max_weight is not None
+            else 1.0
+        )
         if (
             position.instrument.asset_type != AssetType.CASH
             and constraints.max_single_position_weight is not None
@@ -479,7 +559,10 @@ def _risk_adjustments(
 
     for symbol in positions_by_symbol:
         volatility = analytics.volatility_by_symbol.get(symbol)
-        if _is_number(volatility) and volatility > custom_thresholds["high_volatility_threshold"]:
+        if (
+            _is_number(volatility)
+            and volatility > custom_thresholds["high_volatility_threshold"]
+        ):
             adjustments[symbol] -= 0.5
             notes.append(f"{symbol} volatility is elevated at {volatility:.2%}.")
 
@@ -489,7 +572,9 @@ def _risk_adjustments(
             and average_correlation > custom_thresholds["high_correlation_threshold"]
         ):
             adjustments[symbol] -= 0.25
-            notes.append(f"{symbol} has high average correlation at {average_correlation:.2f}.")
+            notes.append(
+                f"{symbol} has high average correlation at {average_correlation:.2f}."
+            )
 
         liquidity_score = liquidity_by_symbol.get(symbol)
         if (
@@ -535,7 +620,9 @@ def _risk_adjustments(
         for group_name, exposure in exposure_by_group.items():
             if exposure <= custom_thresholds["max_theme_exposure"]:
                 continue
-            notes.append(f"{group_name} {theme} exposure is elevated at {exposure:.2%}.")
+            notes.append(
+                f"{group_name} {theme} exposure is elevated at {exposure:.2%}."
+            )
             for symbol in _symbols_in_classification(
                 positions_by_symbol,
                 symbol_map,
@@ -552,7 +639,8 @@ def _classification_groups(
     custom = portfolio_request.constraints.custom
     configured = {
         "sector": custom.get("sector_by_symbol") or custom.get("sectors_by_symbol"),
-        "industry": custom.get("industry_by_symbol") or custom.get("industries_by_symbol"),
+        "industry": custom.get("industry_by_symbol")
+        or custom.get("industries_by_symbol"),
         "theme": custom.get("theme_by_symbol") or custom.get("themes_by_symbol"),
     }
     groups: dict[str, dict[str, str]] = {}
@@ -630,7 +718,14 @@ def _apply_option_limit(
         targets[symbol] = max(bounds[symbol][0], targets[symbol] * scale)
         freed += old_target - targets[symbol]
         constraints_applied[symbol].append("max_options_weight")
-    return _distribute_delta(targets, freed, bounds, _cash_first_order(portfolio_request), constraints_applied, "max_options_weight")
+    return _distribute_delta(
+        targets,
+        freed,
+        bounds,
+        _cash_first_order(portfolio_request),
+        constraints_applied,
+        "max_options_weight",
+    )
 
 
 def _apply_cash_budget(
@@ -671,7 +766,9 @@ def _apply_cash_budget(
         constraints_applied,
         "risk_budget",
     )
-    return _distribute_delta(targets, removed, bounds, cash_symbols, constraints_applied, "risk_budget")
+    return _distribute_delta(
+        targets, removed, bounds, cash_symbols, constraints_applied, "risk_budget"
+    )
 
 
 def _optimizer_mode(
@@ -779,7 +876,9 @@ def _optimizer_expected_returns(
         if _position_asset_type(portfolio_request, symbol) == AssetType.CASH:
             expected.append(0.0)
         else:
-            expected.append((scores[symbol] + risk_adjustments.get(symbol, 0.0)) * scale)
+            expected.append(
+                (scores[symbol] + risk_adjustments.get(symbol, 0.0)) * scale
+            )
     return expected
 
 
@@ -803,9 +902,12 @@ def _optimizer_covariance(
             volatility = (
                 0.0
                 if _position_asset_type(portfolio_request, symbol) == AssetType.CASH
-                else default_option_volatility
-                if _position_asset_type(portfolio_request, symbol) == AssetType.OPTION
-                else default_volatility
+                else (
+                    default_option_volatility
+                    if _position_asset_type(portfolio_request, symbol)
+                    == AssetType.OPTION
+                    else default_volatility
+                )
             )
         volatilities.append(float(volatility))
 
@@ -822,7 +924,11 @@ def _optimizer_covariance(
                 )
                 if not _is_number(correlation):
                     correlation = 0.0
-            row.append(float(correlation) * volatilities[left_index] * volatilities[right_index])
+            row.append(
+                float(correlation)
+                * volatilities[left_index]
+                * volatilities[right_index]
+            )
         covariance.append(row)
     return covariance
 
@@ -837,13 +943,17 @@ def _optimizer_gradient(
 ) -> list[float]:
     gradient = []
     for row_index, row in enumerate(covariance):
-        risk_gradient = 2.0 * risk_aversion * sum(
-            covariance_value * weight
-            for covariance_value, weight in zip(row, weights)
+        risk_gradient = (
+            2.0
+            * risk_aversion
+            * sum(
+                covariance_value * weight
+                for covariance_value, weight in zip(row, weights)
+            )
         )
         return_gradient = -expected_returns[row_index]
-        turnover_gradient = 2.0 * turnover_penalty * (
-            weights[row_index] - current_weights[row_index]
+        turnover_gradient = (
+            2.0 * turnover_penalty * (weights[row_index] - current_weights[row_index])
         )
         gradient.append(risk_gradient + return_gradient + turnover_gradient)
     return gradient
@@ -860,8 +970,7 @@ def _optimizer_objective(
     variance = 0.0
     for row_index, row in enumerate(covariance):
         variance += weights[row_index] * sum(
-            covariance_value * weight
-            for covariance_value, weight in zip(row, weights)
+            covariance_value * weight for covariance_value, weight in zip(row, weights)
         )
     expected_return = sum(
         weight * expected_return
@@ -929,11 +1038,24 @@ def _normalize_targets(
     if abs(difference) <= 1e-10:
         return targets
     if difference > 0:
-        order = _cash_first_order(portfolio_request) + _positive_score_order(scores, portfolio_request)
-        _distribute_delta(targets, difference, bounds, order, constraints_applied, "normalization")
+        order = _cash_first_order(portfolio_request) + _positive_score_order(
+            scores, portfolio_request
+        )
+        _distribute_delta(
+            targets, difference, bounds, order, constraints_applied, "normalization"
+        )
     else:
-        order = _cash_symbols(portfolio_request) + _negative_score_order(scores, portfolio_request)
-        _remove_delta(targets, abs(difference), bounds, order, constraints_applied, "normalization")
+        order = _cash_symbols(portfolio_request) + _negative_score_order(
+            scores, portfolio_request
+        )
+        _remove_delta(
+            targets,
+            abs(difference),
+            bounds,
+            order,
+            constraints_applied,
+            "normalization",
+        )
     return targets
 
 
@@ -989,7 +1111,9 @@ def _portfolio_action(
     portfolio_request: PortfolioRequest,
     change_tolerance: float,
 ) -> str:
-    if all(abs(component.weight_change) <= change_tolerance for component in components):
+    if all(
+        abs(component.weight_change) <= change_tolerance for component in components
+    ):
         return "Hold"
 
     max_portfolio_volatility = portfolio_request.constraints.custom.get(
@@ -1053,9 +1177,7 @@ def _portfolio_rebalance_reason(
         risk_notes,
     )
     if portfolio_risk_context:
-        clauses.append(
-            "Portfolio-level risk view: " + " ".join(portfolio_risk_context)
-        )
+        clauses.append("Portfolio-level risk view: " + " ".join(portfolio_risk_context))
     signal_context = _aggregate_signal_context(components)
     if signal_context:
         clauses.append(signal_context)
@@ -1095,9 +1217,7 @@ def _portfolio_risk_context(
                 f"{relation} the configured {float(max_portfolio_volatility):.2%} budget."
             )
         else:
-            context.append(
-                f"total volatility is {analytics.portfolio_volatility:.2%}."
-            )
+            context.append(f"total volatility is {analytics.portfolio_volatility:.2%}.")
 
     exposure_context = _exposure_context(analytics, portfolio_request)
     if exposure_context:
@@ -1110,7 +1230,9 @@ def _portfolio_risk_context(
             if _is_number(value) and abs(value) > 1e-9
         ]
         if greek_parts:
-            context.append("aggregate option Greeks are " + ", ".join(greek_parts) + ".")
+            context.append(
+                "aggregate option Greeks are " + ", ".join(greek_parts) + "."
+            )
 
     risk_flag_notes = [
         note
@@ -1152,7 +1274,9 @@ def _exposure_context(
     positions_by_symbol = {
         position.instrument.symbol: position for position in portfolio_request.positions
     }
-    for classification_name, symbol_map in _classification_groups(portfolio_request).items():
+    for classification_name, symbol_map in _classification_groups(
+        portfolio_request
+    ).items():
         if classification_name == "sector":
             continue
         elevated_groups = [
@@ -1185,18 +1309,18 @@ def _aggregate_signal_context(components: list[RebalanceComponent]) -> str:
     ]
     if not non_cash:
         return ""
-    positive = sum(1 for component in non_cash if component.rating in {"Buy", "Overweight"})
-    negative = sum(1 for component in non_cash if component.rating in {"Sell", "Underweight"})
+    positive = sum(
+        1 for component in non_cash if component.rating in {"Buy", "Overweight"}
+    )
+    negative = sum(
+        1 for component in non_cash if component.rating in {"Sell", "Underweight"}
+    )
     neutral = len(non_cash) - positive - negative
     added_weight = sum(
-        component.weight_change
-        for component in non_cash
-        if component.weight_change > 0
+        component.weight_change for component in non_cash if component.weight_change > 0
     )
     reduced_weight = -sum(
-        component.weight_change
-        for component in non_cash
-        if component.weight_change < 0
+        component.weight_change for component in non_cash if component.weight_change < 0
     )
     return (
         "Aggregate single-stock signals are "
@@ -1329,7 +1453,9 @@ def _localize_rebalance_text(text: str) -> str:
     return localized
 
 
-def _action_for_change(current_weight: float, target_weight: float, tolerance: float) -> str:
+def _action_for_change(
+    current_weight: float, target_weight: float, tolerance: float
+) -> str:
     change = target_weight - current_weight
     if current_weight > tolerance and target_weight <= tolerance:
         return "Sell"
