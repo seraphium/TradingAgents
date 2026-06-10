@@ -50,6 +50,11 @@ from tradingagents.portfolio.rebalancing import (
     extract_ratings_from_portfolio_result,
     generate_rebalance_proposal,
 )
+from tradingagents.portfolio.risk_review import (
+    ConstraintAdjustmentRequest,
+    extract_constraint_adjustment_request,
+    validate_constraint_adjustment_requests,
+)
 from tradingagents.portfolio.schemas import PortfolioRequest
 
 if TYPE_CHECKING:
@@ -84,6 +89,10 @@ class PortfolioWorkflowState(TypedDict, total=False):
     instrument_proposals: dict[str, InstrumentProposal]
     data_quality_assessment: DataQualityAssessment
     rebalance_proposal: RebalanceProposal
+    proposal_history: list[dict[str, Any]]
+    risk_constraint_request: ConstraintAdjustmentRequest
+    reviewer_constraint_request: ConstraintAdjustmentRequest
+    reoptimization_count: int
     portfolio_risk_analysis: str
     portfolio_rebalance_review: str
     final_portfolio_decision: str
@@ -224,27 +233,112 @@ def run_portfolio_workflow(
     state["instrument_proposals"] = instrument_proposals
     state["data_quality_assessment"] = data_quality
     state["rebalance_proposal"] = proposal
-    emit("stage_completed", STAGE_DETERMINISTIC_REBALANCE)
+    state["proposal_history"] = [
+        {"version": 1, "reason": "Initial deterministic proposal", "proposal": proposal}
+    ]
+    state["reoptimization_count"] = 0
+    emit("stage_completed", STAGE_DETERMINISTIC_REBALANCE, proposal_version=1)
 
     emit("stage_started", STAGE_PORTFOLIO_REVIEW)
-    review_nodes = (
-        (
-            "risk_controller",
-            create_portfolio_risk_analyst(workflow_graph.deep_thinking_llm),
-        ),
-        (
-            "allocation_proposal_reviewer",
-            create_portfolio_rebalancer(workflow_graph.deep_thinking_llm),
-        ),
-        (
-            "portfolio_decision_approver",
-            create_portfolio_allocation_manager(workflow_graph.deep_thinking_llm),
-        ),
+    risk_node = create_portfolio_risk_analyst(workflow_graph.deep_thinking_llm)
+    reviewer_node = create_portfolio_rebalancer(workflow_graph.deep_thinking_llm)
+    approver_node = create_portfolio_allocation_manager(
+        workflow_graph.deep_thinking_llm
     )
-    for agent_name, node in review_nodes:
+
+    for agent_name, node in (
+        ("risk_controller", risk_node),
+        ("allocation_proposal_reviewer", reviewer_node),
+    ):
         emit("agent_started", STAGE_PORTFOLIO_REVIEW, agent=agent_name)
         state.update(node(state))
+        response_key, request_key = (
+            ("portfolio_risk_analysis", "risk_constraint_request")
+            if agent_name == "risk_controller"
+            else ("portfolio_rebalance_review", "reviewer_constraint_request")
+        )
+        adjustment_request = extract_constraint_adjustment_request(
+            state.get(response_key, "")
+        )
+        if adjustment_request is not None:
+            state[request_key] = adjustment_request
         emit("agent_completed", STAGE_PORTFOLIO_REVIEW, agent=agent_name)
+
+    requested_adjustments = [
+        (source, state[key])
+        for source, key in (
+            ("risk_controller", "risk_constraint_request"),
+            ("allocation_proposal_reviewer", "reviewer_constraint_request"),
+        )
+        if key in state
+    ]
+    max_rounds = min(
+        max(int(config.get("portfolio_max_reoptimization_rounds", 1)), 0), 1
+    )
+    max_adjustment = min(
+        max(float(config.get("portfolio_max_constraint_adjustment", 0.10)), 0.0),
+        0.10,
+    )
+    validated_adjustment = validate_constraint_adjustment_requests(
+        request, requested_adjustments, max_adjustment=max_adjustment
+    )
+    if validated_adjustment is not None:
+        for rejection in validated_adjustment.rejected_requests:
+            state["warnings"].append(rejection)
+            emit(
+                "warning",
+                STAGE_PORTFOLIO_REVIEW,
+                source="constraint_adjustment",
+                message=rejection,
+            )
+    if (
+        validated_adjustment is not None
+        and config.get("portfolio_reoptimization_enabled", True)
+        and max_rounds > 0
+    ):
+        emit(
+            "reoptimization_started",
+            STAGE_PORTFOLIO_REVIEW,
+            proposal_version=2,
+            adjustments=validated_adjustment.adjustments,
+        )
+        proposal = generate_rebalance_proposal(
+            request,
+            analytics,
+            ratings_by_symbol=ratings,
+            instrument_proposals=instrument_proposals,
+            data_quality=data_quality,
+            market_regime=state["market_regime"],
+            sector_by_symbol=analytics_inputs.sector_by_symbol,
+            holdings=holding_evidence,
+            constraint_overrides=validated_adjustment.adjustments,
+        )
+        state["rebalance_proposal"] = proposal
+        state["reoptimization_count"] = 1
+        state["proposal_history"].append(
+            {
+                "version": 2,
+                "reason": "; ".join(validated_adjustment.reasons),
+                "constraint_adjustments": validated_adjustment.adjustments,
+                "proposal": proposal,
+            }
+        )
+        emit("reoptimization_completed", STAGE_PORTFOLIO_REVIEW, proposal_version=2)
+        emit(
+            "agent_started",
+            STAGE_PORTFOLIO_REVIEW,
+            agent="risk_controller_final_validation",
+        )
+        state.update(risk_node(state))
+        emit(
+            "agent_completed",
+            STAGE_PORTFOLIO_REVIEW,
+            agent="risk_controller_final_validation",
+        )
+
+    emit("agent_started", STAGE_PORTFOLIO_REVIEW, agent="portfolio_decision_approver")
+    state.update(approver_node(state))
+    emit("agent_completed", STAGE_PORTFOLIO_REVIEW, agent="portfolio_decision_approver")
     emit("stage_completed", STAGE_PORTFOLIO_REVIEW)
 
     return state

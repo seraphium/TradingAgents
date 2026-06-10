@@ -77,6 +77,7 @@ def generate_rebalance_proposal(
     liquidity_by_symbol: Mapping[str, float] | None = None,
     holdings: list[Mapping[str, Any]] | None = None,
     optimizer: Literal["heuristic", "mean_variance"] | None = None,
+    constraint_overrides: Mapping[str, float] | None = None,
     score_step: float = 0.05,
     change_tolerance: float = 0.005,
 ) -> RebalanceProposal:
@@ -91,7 +92,8 @@ def generate_rebalance_proposal(
     structured_proposals = instrument_proposals or {}
     liquidity = liquidity_by_symbol or {}
     holding_evidence = _holding_evidence_by_symbol(holdings or [])
-    bounds = _component_bounds(portfolio_request)
+    overrides = constraint_overrides or {}
+    bounds = _component_bounds(portfolio_request, overrides)
     if data_quality is not None:
         for symbol in data_quality.restricted_symbols:
             if symbol in bounds:
@@ -129,6 +131,7 @@ def generate_rebalance_proposal(
         "score_step": score_step,
         "change_tolerance": change_tolerance,
         "optimizer": optimizer_mode,
+        "constraint_overrides": dict(overrides),
         "instrument_proposal_sources": {
             symbol: proposal.source for symbol, proposal in structured_proposals.items()
         },
@@ -179,7 +182,7 @@ def generate_rebalance_proposal(
         sector_by_symbol or {},
     )
     targets = _apply_option_limit(
-        portfolio_request, targets, bounds, constraints_applied
+        portfolio_request, targets, bounds, constraints_applied, overrides
     )
     targets = _apply_cash_budget(
         portfolio_request, analytics, targets, bounds, constraints_applied
@@ -513,9 +516,15 @@ def _truncate_text(value: Any, limit: int = 360) -> str:
 
 def _component_bounds(
     portfolio_request: PortfolioRequest,
+    constraint_overrides: Mapping[str, float] | None = None,
 ) -> dict[str, tuple[float, float]]:
     bounds: dict[str, tuple[float, float]] = {}
     constraints = portfolio_request.constraints
+    overrides = constraint_overrides or {}
+    max_single_position_weight = overrides.get(
+        "max_single_position_weight", constraints.max_single_position_weight
+    )
+    min_cash_weight = overrides.get("min_cash_weight", constraints.min_cash_weight)
     for position in portfolio_request.positions:
         symbol = position.instrument.symbol
         minimum = (
@@ -530,12 +539,12 @@ def _component_bounds(
         )
         if (
             position.instrument.asset_type != AssetType.CASH
-            and constraints.max_single_position_weight is not None
+            and max_single_position_weight is not None
         ):
-            maximum = min(maximum, constraints.max_single_position_weight)
+            maximum = min(maximum, max_single_position_weight)
         if position.instrument.asset_type == AssetType.CASH:
-            if constraints.min_cash_weight is not None:
-                minimum = max(minimum, constraints.min_cash_weight)
+            if min_cash_weight is not None:
+                minimum = max(minimum, min_cash_weight)
             if constraints.max_cash_weight is not None:
                 maximum = min(maximum, constraints.max_cash_weight)
         bounds[symbol] = (float(minimum), float(maximum))
@@ -822,8 +831,11 @@ def _apply_option_limit(
     targets: dict[str, float],
     bounds: Mapping[str, tuple[float, float]],
     constraints_applied: dict[str, list[str]],
+    constraint_overrides: Mapping[str, float] | None = None,
 ) -> dict[str, float]:
-    max_options_weight = portfolio_request.constraints.max_options_weight
+    max_options_weight = (constraint_overrides or {}).get(
+        "max_options_weight", portfolio_request.constraints.max_options_weight
+    )
     if max_options_weight is None:
         return targets
 
