@@ -34,11 +34,10 @@ from tradingagents.portfolio import (
     PortfolioParseError,
     PortfolioPosition,
     PortfolioRequest,
-    extract_portfolio_allocation_summary,
     load_portfolio_file,
     default_portfolio_report_dir,
     save_portfolio_report_to_disk,
-    render_rebalance_proposal,
+    render_portfolio_decision_summary,
     run_portfolio_workflow,
 )
 from cli.models import AnalystType
@@ -982,52 +981,18 @@ def save_report_to_disk(final_state, ticker: str, save_path: Path):
 
 
 def display_portfolio_report(portfolio_state: dict) -> None:
+    """Display the concise decision-first portfolio result."""
+
     console.print()
-    console.print(Rule("Portfolio Analysis Report", style="bold green"))
-    if portfolio_state.get("rebalance_proposal"):
-        final_summary = extract_portfolio_allocation_summary(
-            portfolio_state.get("final_portfolio_decision")
+    console.print(Rule("Portfolio Decision", style="bold green"))
+    console.print(
+        Panel(
+            Markdown(render_portfolio_decision_summary(portfolio_state)),
+            title="Decision-First Portfolio Report",
+            border_style="green",
+            padding=(1, 2),
         )
-        console.print(
-            Panel(
-                Markdown(
-                    render_rebalance_proposal(
-                        portfolio_state["rebalance_proposal"],
-                        final_summary=final_summary,
-                    )
-                ),
-                title="Deterministic Rebalance Proposal",
-                border_style="cyan",
-                padding=(1, 2),
-            )
-        )
-    if portfolio_state.get("portfolio_risk_analysis"):
-        console.print(
-            Panel(
-                Markdown(portfolio_state["portfolio_risk_analysis"]),
-                title="Portfolio Risk Controller",
-                border_style="red",
-                padding=(1, 2),
-            )
-        )
-    if portfolio_state.get("portfolio_rebalance_review"):
-        console.print(
-            Panel(
-                Markdown(portfolio_state["portfolio_rebalance_review"]),
-                title="Allocation Proposal Reviewer",
-                border_style="yellow",
-                padding=(1, 2),
-            )
-        )
-    if portfolio_state.get("final_portfolio_decision"):
-        console.print(
-            Panel(
-                Markdown(portfolio_state["final_portfolio_decision"]),
-                title="Portfolio Decision Approver",
-                border_style="green",
-                padding=(1, 2),
-            )
-        )
+    )
 
 
 def display_complete_report(final_state):

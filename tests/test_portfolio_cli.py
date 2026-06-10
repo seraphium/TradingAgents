@@ -72,7 +72,10 @@ def test_load_portfolio_request_for_cli_uses_portfolio_file(tmp_path):
     request = load_portfolio_request_for_cli(path, trade_date="2026-05-27")
 
     assert request.trade_date.isoformat() == "2026-05-27"
-    assert [position.instrument.symbol for position in request.positions] == ["AAPL", "CASH"]
+    assert [position.instrument.symbol for position in request.positions] == [
+        "AAPL",
+        "CASH",
+    ]
 
 
 @pytest.mark.unit
@@ -142,7 +145,9 @@ def test_save_portfolio_report_to_disk_writes_expected_shape(tmp_path):
     assert (tmp_path / "portfolio_report" / "portfolio" / "rebalance.md").exists()
     assert (tmp_path / "portfolio_report" / "portfolio" / "risk.md").exists()
     assert (tmp_path / "portfolio_report" / "portfolio" / "final_decision.md").exists()
-    assert "Portfolio Analysis Report" in report_paths.complete_report.read_text(encoding="utf-8")
+    assert "Portfolio Decision Report" in report_paths.complete_report.read_text(
+        encoding="utf-8"
+    )
 
 
 @pytest.mark.unit

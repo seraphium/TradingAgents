@@ -74,9 +74,11 @@ from tradingagents.portfolio.workflow import (
 )
 from tradingagents.portfolio.reports import (
     PortfolioReportPaths,
+    build_final_result,
     default_portfolio_report_dir,
     render_complete_portfolio_report,
     render_holding_report,
+    render_portfolio_decision_summary,
     save_portfolio_report_to_disk,
 )
 
@@ -110,6 +112,7 @@ __all__ = [
     "PortfolioWorkflowEvent",
     "PortfolioWorkflowState",
     "assess_data_quality",
+    "build_final_result",
     "calculate_portfolio_analytics",
     "collect_portfolio_analytics_inputs",
     "collect_portfolio_market_context",
@@ -132,6 +135,7 @@ __all__ = [
     "rebalance_proposal_to_dict",
     "render_complete_portfolio_report",
     "render_holding_report",
+    "render_portfolio_decision_summary",
     "render_rebalance_proposal",
     "run_portfolio_workflow",
     "validate_constraint_adjustment_requests",
