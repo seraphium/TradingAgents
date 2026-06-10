@@ -85,6 +85,7 @@ def test_run_portfolio_workflow_is_reusable_and_emits_stable_events(monkeypatch)
     monkeypatch.setattr(
         workflow, "generate_rebalance_proposal", lambda *args, **kwargs: proposal
     )
+    monkeypatch.setattr(workflow, "validate_rebalance_proposal", lambda *args: [])
     monkeypatch.setattr(
         workflow,
         "create_portfolio_risk_analyst",
@@ -173,6 +174,7 @@ def test_run_portfolio_workflow_constructs_graph_for_programmatic_caller(monkeyp
     monkeypatch.setattr(
         workflow, "generate_rebalance_proposal", lambda *args, **kwargs: object()
     )
+    monkeypatch.setattr(workflow, "validate_rebalance_proposal", lambda *args: [])
     monkeypatch.setattr(
         workflow, "create_portfolio_risk_analyst", lambda llm: lambda state: {}
     )

@@ -28,6 +28,13 @@ from tradingagents.portfolio.data_quality import (
     DataQualityPolicy,
     assess_data_quality,
 )
+from tradingagents.portfolio.decision_protocol import (
+    FinalPortfolioResult,
+    PortfolioApprovalDecision,
+    ProposalReview,
+    RiskValidationResult,
+    validate_rebalance_proposal,
+)
 from tradingagents.portfolio.data_inputs import (
     PortfolioAnalyticsInputs,
     collect_portfolio_analytics_inputs,
@@ -84,8 +91,12 @@ class PortfolioWorkflowState(TypedDict, total=False):
     instrument_proposals: dict[str, InstrumentProposal]
     data_quality_assessment: DataQualityAssessment
     rebalance_proposal: RebalanceProposal
+    risk_validation_result: RiskValidationResult
     portfolio_risk_analysis: str
+    proposal_review: ProposalReview
     portfolio_rebalance_review: str
+    portfolio_approval_decision: PortfolioApprovalDecision
+    final_portfolio_result: FinalPortfolioResult
     final_portfolio_decision: str
     warnings: list[str]
     events: list[PortfolioWorkflowEvent]
@@ -224,7 +235,17 @@ def run_portfolio_workflow(
     state["instrument_proposals"] = instrument_proposals
     state["data_quality_assessment"] = data_quality
     state["rebalance_proposal"] = proposal
-    emit("stage_completed", STAGE_DETERMINISTIC_REBALANCE)
+    proposal_errors = validate_rebalance_proposal(proposal, request)
+    if proposal_errors:
+        raise ValueError(
+            "invalid deterministic rebalance proposal: " + "; ".join(proposal_errors)
+        )
+    emit(
+        "stage_completed",
+        STAGE_DETERMINISTIC_REBALANCE,
+        proposal_id=getattr(proposal, "proposal_id", None),
+        proposal_version=getattr(proposal, "version", None),
+    )
 
     emit("stage_started", STAGE_PORTFOLIO_REVIEW)
     review_nodes = (

@@ -11,22 +11,24 @@ back gracefully to free-text generation.
 from __future__ import annotations
 
 from tradingagents.agents.schemas import (
-    PortfolioAllocationDecision,
     PortfolioDecision,
     render_pm_decision,
-    render_portfolio_allocation_decision,
 )
 from tradingagents.agents.utils.agent_utils import (
     build_instrument_context,
     get_language_instruction,
 )
-from tradingagents.agents.utils.portfolio_prompting import (
-    format_holding_evidence,
-    format_portfolio_payload,
-)
+from tradingagents.agents.utils.portfolio_prompting import format_portfolio_payload
 from tradingagents.agents.utils.structured import (
     bind_structured,
     invoke_structured_or_freetext,
+)
+from tradingagents.portfolio.decision_protocol import (
+    PortfolioApprovalDecision,
+    ReviewDecision,
+    build_final_portfolio_result,
+    rejected_approval,
+    render_final_portfolio_result,
 )
 
 
@@ -87,8 +89,12 @@ Be decisive and ground every conclusion in specific evidence from the analysts.{
             "conservative_history": risk_debate_state["conservative_history"],
             "neutral_history": risk_debate_state["neutral_history"],
             "latest_speaker": "Judge",
-            "current_aggressive_response": risk_debate_state["current_aggressive_response"],
-            "current_conservative_response": risk_debate_state["current_conservative_response"],
+            "current_aggressive_response": risk_debate_state[
+                "current_aggressive_response"
+            ],
+            "current_conservative_response": risk_debate_state[
+                "current_conservative_response"
+            ],
             "current_neutral_response": risk_debate_state["current_neutral_response"],
             "count": risk_debate_state["count"],
         }
@@ -102,74 +108,63 @@ Be decisive and ground every conclusion in specific evidence from the analysts.{
 
 
 def create_portfolio_allocation_manager(llm):
-    """Create a portfolio-level final decision node.
-
-    This is separate from ``create_portfolio_manager`` so the existing
-    single-instrument portfolio manager contract remains unchanged.
-    """
+    """Create a final approver that can only approve or reject one proposal."""
 
     structured_llm = bind_structured(
-        llm,
-        PortfolioAllocationDecision,
-        "Portfolio Allocation Manager",
+        llm, PortfolioApprovalDecision, "Portfolio Decision Approver"
     )
 
     def portfolio_allocation_manager_node(state) -> dict:
-        analytics = state.get("portfolio_analytics")
-        market_context = state.get("portfolio_market_context")
-        market_regime = state.get("market_regime")
-        rebalance_proposal = state.get("rebalance_proposal")
-        portfolio_risk_analysis = state.get("portfolio_risk_analysis", "")
-        portfolio_rebalance_review = state.get("portfolio_rebalance_review", "")
-        holdings = state.get("holdings", [])
+        proposal = state["rebalance_proposal"]
+        request = state["portfolio_request"]
+        prompt = f"""As the Portfolio Decision Approver, approve or reject the supplied deterministic proposal.
 
-        prompt = f"""As the Portfolio Allocation Manager, deliver the final whole-portfolio decision.
-
-Use the deterministic analytics and rebalance proposal as the numeric source of truth. You may critique the proposal, but do not invent new current weights, target weights, volatility, beta, correlation, Greek, liquidity, or concentration values. The final output must include one component recommendation for every supplied portfolio component.
-
-Use the single-stock Portfolio Manager decisions and the aggressive/conservative/neutral debate evidence as the qualitative source of truth for each holding. Do not repeat one rebalance reason per stock. Instead, form one whole-portfolio thesis that reconciles all holding-level conclusions with sector, industry, or theme exposure; concentration; correlation; total volatility; cash; options exposure; and target-weight constraints.
-
-**Single-Stock Decision Evidence**
-```json
-{format_holding_evidence(holdings)}
-```
-
-**Portfolio-Wide Market Context**
-```json
-{format_portfolio_payload(market_context)}
-```
-
-**Validated Market Regime and Allocation Overlay**
-```json
-{format_portfolio_payload(market_regime)}
-```
-
-**Deterministic Portfolio Analytics**
-```json
-{format_portfolio_payload(analytics)}
-```
+Return a structured decision referencing proposal_id `{proposal.proposal_id}` and proposal_version `{proposal.version}`. You must not generate target weights, component recommendations, or an executable trade list. Reject if the risk controller or proposal reviewer rejects the proposal, or if the evidence does not support approval.
 
 **Deterministic Rebalance Proposal**
 ```json
-{format_portfolio_payload(rebalance_proposal)}
+{format_portfolio_payload(proposal)}
 ```
-
-**Portfolio Risk Analyst Notes**
-{portfolio_risk_analysis}
-
-**Portfolio Rebalancer Review**
-{portfolio_rebalance_review}
-
-Choose a portfolio action from Rebalance, Hold, De-risk, or Increase Risk. The summary must be a portfolio-level recommendation, for example reducing an over-concentrated industry/theme exposure, responding to broad market/news/sentiment/fundamental conditions, or lowering total volatility while preserving the strongest single-stock conclusions. For each component, provide current weight, target weight, weight change, action, a component summary based on the single-stock final conclusion, and a concise execution rationale.{get_language_instruction()}"""
-
-        final_decision = invoke_structured_or_freetext(
-            structured_llm,
-            llm,
-            prompt,
-            render_portfolio_allocation_decision,
-            "Portfolio Allocation Manager",
-        )
-
-        return {"final_portfolio_decision": final_decision}
+**Risk Validation**
+```json
+{format_portfolio_payload(state.get('risk_validation_result'))}
+```
+**Proposal Review**
+```json
+{format_portfolio_payload(state.get('proposal_review'))}
+```
+**Portfolio-Wide Market Context**
+```json
+{format_portfolio_payload(state.get('portfolio_market_context'))}
+```
+Use the deterministic analytics and proposal as the numeric source of truth. The summary must be a portfolio-level recommendation.{get_language_instruction()}"""
+        try:
+            approval = (
+                structured_llm.invoke(prompt) if structured_llm is not None else None
+            )
+            if not isinstance(approval, PortfolioApprovalDecision):
+                raise TypeError("approver did not return PortfolioApprovalDecision")
+        except Exception as exc:
+            approval = rejected_approval(proposal, str(exc))
+        if (
+            state.get("risk_validation_result") is not None
+            and state["risk_validation_result"].decision == ReviewDecision.REJECT
+        ) or (
+            state.get("proposal_review") is not None
+            and state["proposal_review"].decision == ReviewDecision.REJECT
+        ):
+            approval = PortfolioApprovalDecision(
+                proposal_id=proposal.proposal_id,
+                proposal_version=proposal.version,
+                decision=ReviewDecision.REJECT,
+                summary="Portfolio review protocol rejected the proposal.",
+                rationale="At least one required review rejected or could not validate the proposal.",
+            )
+        final_result = build_final_portfolio_result(proposal, request, approval)
+        return {
+            "portfolio_approval_decision": approval,
+            "final_portfolio_result": final_result,
+            "final_portfolio_decision": render_final_portfolio_result(final_result),
+        }
 
     return portfolio_allocation_manager_node

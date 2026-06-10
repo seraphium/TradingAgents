@@ -33,6 +33,16 @@ from tradingagents.portfolio.instrument_proposals import (
     ProposalSource,
     extract_instrument_proposals,
 )
+from tradingagents.portfolio.decision_protocol import (
+    FinalPortfolioResult,
+    PortfolioApprovalDecision,
+    ProposalReview,
+    ReviewDecision,
+    RiskValidationResult,
+    build_final_portfolio_result,
+    render_final_portfolio_result,
+    validate_rebalance_proposal,
+)
 from tradingagents.portfolio.data_inputs import (
     PortfolioAnalyticsInputs,
     collect_portfolio_analytics_inputs,
@@ -61,11 +71,6 @@ from tradingagents.portfolio.rebalancing import (
     rebalance_proposal_to_dict,
     render_rebalance_proposal,
 )
-from tradingagents.portfolio.workflow import (
-    PortfolioWorkflowEvent,
-    PortfolioWorkflowState,
-    run_portfolio_workflow,
-)
 from tradingagents.portfolio.reports import (
     PortfolioReportPaths,
     default_portfolio_report_dir,
@@ -85,6 +90,11 @@ __all__ = [
     "ConstraintFlag",
     "DataQualityAssessment",
     "DataQualityPolicy",
+    "FinalPortfolioResult",
+    "PortfolioApprovalDecision",
+    "ProposalReview",
+    "ReviewDecision",
+    "RiskValidationResult",
     "InstrumentProposal",
     "ProposalSource",
     "OptionGreeks",
@@ -102,6 +112,7 @@ __all__ = [
     "PortfolioWorkflowEvent",
     "PortfolioWorkflowState",
     "assess_data_quality",
+    "build_final_portfolio_result",
     "calculate_portfolio_analytics",
     "collect_portfolio_analytics_inputs",
     "collect_portfolio_market_context",
@@ -122,8 +133,24 @@ __all__ = [
     "portfolio_analytics_to_dict",
     "rebalance_proposal_to_dict",
     "render_complete_portfolio_report",
+    "render_final_portfolio_result",
     "render_holding_report",
     "render_rebalance_proposal",
     "run_portfolio_workflow",
+    "validate_rebalance_proposal",
     "save_portfolio_report_to_disk",
 ]
+
+
+def __getattr__(name: str):
+    """Lazily expose workflow objects to avoid agent/portfolio import cycles."""
+
+    if name in {
+        "PortfolioWorkflowEvent",
+        "PortfolioWorkflowState",
+        "run_portfolio_workflow",
+    }:
+        from tradingagents.portfolio import workflow
+
+        return getattr(workflow, name)
+    raise AttributeError(name)
