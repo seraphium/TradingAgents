@@ -37,6 +37,15 @@ from tradingagents.portfolio.data_inputs import (
     PortfolioAnalyticsInputs,
     collect_portfolio_analytics_inputs,
 )
+from tradingagents.portfolio.market_regime import (
+    BenchmarkTrendFeatures,
+    MarketOverlay,
+    MarketRegime,
+    MarketRegimeLabel,
+    create_market_regime_agent,
+    derive_benchmark_trend_features,
+    derive_market_regime,
+)
 from tradingagents.portfolio.market_context import (
     PortfolioMarketContext,
     collect_portfolio_market_context,
@@ -82,6 +91,10 @@ __all__ = [
     "PortfolioAnalytics",
     "PortfolioAnalyticsInputs",
     "PortfolioMarketContext",
+    "BenchmarkTrendFeatures",
+    "MarketOverlay",
+    "MarketRegime",
+    "MarketRegimeLabel",
     "RATING_SCORES",
     "RebalanceComponent",
     "RebalanceProposal",
@@ -92,6 +105,9 @@ __all__ = [
     "calculate_portfolio_analytics",
     "collect_portfolio_analytics_inputs",
     "collect_portfolio_market_context",
+    "create_market_regime_agent",
+    "derive_benchmark_trend_features",
+    "derive_market_regime",
     "default_portfolio_report_dir",
     "extract_holding_evidence_from_portfolio_result",
     "extract_instrument_proposals",

@@ -27,6 +27,7 @@ class PortfolioReportPaths:
     portfolio_dir: Path
     analytics_json: Path | None = None
     market_context_json: Path | None = None
+    market_regime_json: Path | None = None
     data_quality_json: Path | None = None
     instrument_proposals_json: Path | None = None
     rebalance_json: Path | None = None
@@ -81,6 +82,15 @@ def save_portfolio_report_to_disk(
         market_context_json = portfolio_dir / "market_context.json"
         market_context_json.write_text(
             json.dumps(_json_payload(market_context), indent=2, default=str),
+            encoding="utf-8",
+        )
+
+    market_regime_json = None
+    market_regime = portfolio_state.get("market_regime")
+    if market_regime is not None:
+        market_regime_json = portfolio_dir / "market_regime.json"
+        market_regime_json.write_text(
+            json.dumps(_json_payload(market_regime), indent=2, default=str),
             encoding="utf-8",
         )
 
@@ -158,6 +168,7 @@ def save_portfolio_report_to_disk(
         portfolio_dir=portfolio_dir,
         analytics_json=analytics_json,
         market_context_json=market_context_json,
+        market_regime_json=market_regime_json,
         data_quality_json=data_quality_json,
         instrument_proposals_json=instrument_proposals_json,
         rebalance_json=rebalance_json,
@@ -263,6 +274,18 @@ def render_complete_portfolio_report(portfolio_state: dict[str, Any]) -> str:
                 "",
                 "## Portfolio-Wide Market Context",
                 "See `portfolio/market_context.json`.",
+            ]
+        )
+    market_regime = portfolio_state.get("market_regime")
+    if market_regime:
+        implications = getattr(market_regime, "allocation_implications", [])
+        sections.extend(
+            [
+                "",
+                "## Validated Market Regime and Allocation Implications",
+                getattr(market_regime, "summary", str(market_regime)),
+                *[f"- {item}" for item in implications],
+                "- See `portfolio/market_regime.json` for deterministic features and overlay diagnostics.",
             ]
         )
     if portfolio_state.get("rebalance_proposal"):

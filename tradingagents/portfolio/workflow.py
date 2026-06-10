@@ -36,6 +36,10 @@ from tradingagents.portfolio.instrument_proposals import (
     InstrumentProposal,
     extract_instrument_proposals,
 )
+from tradingagents.portfolio.market_regime import (
+    MarketRegime,
+    create_market_regime_agent,
+)
 from tradingagents.portfolio.market_context import (
     PortfolioMarketContext,
     collect_portfolio_market_context,
@@ -75,6 +79,7 @@ class PortfolioWorkflowState(TypedDict, total=False):
     portfolio_analytics_inputs: PortfolioAnalyticsInputs
     portfolio_analytics: PortfolioAnalytics
     portfolio_market_context: PortfolioMarketContext
+    market_regime: MarketRegime
     ratings_by_symbol: dict[str, str]
     instrument_proposals: dict[str, InstrumentProposal]
     data_quality_assessment: DataQualityAssessment
@@ -177,6 +182,10 @@ def run_portfolio_workflow(
     state["portfolio_analytics_inputs"] = analytics_inputs
     state["portfolio_analytics"] = analytics
     state["portfolio_market_context"] = market_context
+    regime_node = create_market_regime_agent(
+        max_cash_shift=float(config.get("market_overlay_max_cash_shift", 0.05))
+    )
+    state.update(regime_node(state))
     for warning in analytics_inputs.warnings:
         state["warnings"].append(warning)
         emit("warning", STAGE_PORTFOLIO_ANALYTICS, source="data", message=warning)
@@ -207,6 +216,8 @@ def run_portfolio_workflow(
         ratings_by_symbol=ratings,
         instrument_proposals=instrument_proposals,
         data_quality=data_quality,
+        market_regime=state["market_regime"],
+        sector_by_symbol=analytics_inputs.sector_by_symbol,
         holdings=holding_evidence,
     )
     state["ratings_by_symbol"] = ratings

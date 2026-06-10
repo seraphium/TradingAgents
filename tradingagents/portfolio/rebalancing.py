@@ -20,6 +20,7 @@ from tradingagents.portfolio.schemas import AssetType, PortfolioRequest
 if TYPE_CHECKING:
     from tradingagents.portfolio.data_quality import DataQualityAssessment
     from tradingagents.portfolio.instrument_proposals import InstrumentProposal
+    from tradingagents.portfolio.market_regime import MarketRegime
 
 
 RATING_SCORES: dict[str, float] = {
@@ -71,6 +72,8 @@ def generate_rebalance_proposal(
     ratings_by_symbol: Mapping[str, str] | None = None,
     instrument_proposals: Mapping[str, "InstrumentProposal"] | None = None,
     data_quality: "DataQualityAssessment" | None = None,
+    market_regime: "MarketRegime" | None = None,
+    sector_by_symbol: Mapping[str, str] | None = None,
     liquidity_by_symbol: Mapping[str, float] | None = None,
     holdings: list[Mapping[str, Any]] | None = None,
     optimizer: Literal["heuristic", "mean_variance"] | None = None,
@@ -132,6 +135,9 @@ def generate_rebalance_proposal(
         "data_quality_status": (
             data_quality.status if data_quality is not None else None
         ),
+        "market_regime": (
+            market_regime.model_dump(mode="json") if market_regime is not None else None
+        ),
     }
     targets = dict(current_weights)
     constraints_applied = {symbol: [] for symbol in positions_by_symbol}
@@ -164,6 +170,14 @@ def generate_rebalance_proposal(
             if targets[symbol] != unclamped:
                 constraints_applied[symbol].append("component_bounds")
 
+    targets = _apply_market_overlay(
+        portfolio_request,
+        targets,
+        bounds,
+        constraints_applied,
+        market_regime,
+        sector_by_symbol or {},
+    )
     targets = _apply_option_limit(
         portfolio_request, targets, bounds, constraints_applied
     )
@@ -197,6 +211,13 @@ def generate_rebalance_proposal(
             rationale_parts.append("Target set by mean-variance optimizer.")
         if risk_adjustments.get(symbol):
             rationale_parts.append(f"Risk adjustment {risk_adjustments[symbol]:+.2f}.")
+        if (
+            "market_regime_overlay" in constraints_applied[symbol]
+            and market_regime is not None
+        ):
+            rationale_parts.append(
+                f"Validated {market_regime.label.value} market overlay applied."
+            )
         if constraints_applied[symbol]:
             rationale_parts.append(
                 "Applied constraints: " + ", ".join(constraints_applied[symbol]) + "."
@@ -690,6 +711,110 @@ def _classification_lookup_symbol(position: Any) -> str:
     if instrument.asset_type == AssetType.OPTION and instrument.underlying:
         return str(instrument.underlying).upper()
     return str(instrument.symbol).upper()
+
+
+def _apply_market_overlay(
+    portfolio_request: PortfolioRequest,
+    targets: dict[str, float],
+    bounds: Mapping[str, tuple[float, float]],
+    constraints_applied: dict[str, list[str]],
+    market_regime: "MarketRegime" | None,
+    sector_by_symbol: Mapping[str, str],
+) -> dict[str, float]:
+    """Apply a validated market overlay, then leave hard bounds to final normalization."""
+
+    if market_regime is None or market_regime.confidence < 0.25:
+        return targets
+    overlay = market_regime.overlay
+    cash_symbols = _cash_symbols(portfolio_request)
+    risky_symbols = [
+        position.instrument.symbol
+        for position in portfolio_request.positions
+        if position.instrument.asset_type != AssetType.CASH
+    ]
+    cash_shift = overlay.cash_weight_adjustment
+    if cash_shift > 0 and cash_symbols:
+        removed = _remove_delta(
+            targets,
+            cash_shift,
+            bounds,
+            risky_symbols,
+            constraints_applied,
+            "market_regime_overlay",
+        )
+        targets = _distribute_delta(
+            targets,
+            removed,
+            bounds,
+            cash_symbols,
+            constraints_applied,
+            "market_regime_overlay",
+        )
+    elif cash_shift < 0 and cash_symbols:
+        removed = _remove_delta(
+            targets,
+            abs(cash_shift),
+            bounds,
+            cash_symbols,
+            constraints_applied,
+            "market_regime_overlay",
+        )
+        targets = _distribute_delta(
+            targets,
+            removed,
+            bounds,
+            risky_symbols,
+            constraints_applied,
+            "market_regime_overlay",
+        )
+
+    positions_by_symbol = {
+        position.instrument.symbol: position for position in portfolio_request.positions
+    }
+    for sector, adjustment in overlay.sector_weight_adjustments.items():
+        sector_symbols = _symbols_in_classification(
+            positions_by_symbol, sector_by_symbol, sector
+        )
+        other_risky = [
+            symbol for symbol in risky_symbols if symbol not in sector_symbols
+        ]
+        if not sector_symbols or not other_risky or abs(adjustment) < 1e-12:
+            continue
+        if adjustment > 0:
+            removed = _remove_delta(
+                targets,
+                adjustment,
+                bounds,
+                other_risky,
+                constraints_applied,
+                "market_regime_overlay",
+            )
+            targets = _distribute_delta(
+                targets,
+                removed,
+                bounds,
+                sector_symbols,
+                constraints_applied,
+                "market_regime_overlay",
+            )
+        else:
+            removed = _remove_delta(
+                targets,
+                abs(adjustment),
+                bounds,
+                sector_symbols,
+                constraints_applied,
+                "market_regime_overlay",
+            )
+            targets = _distribute_delta(
+                targets,
+                removed,
+                bounds,
+                other_risky,
+                constraints_applied,
+                "market_regime_overlay",
+            )
+    return targets
 
 
 def _apply_option_limit(
