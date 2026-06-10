@@ -117,6 +117,7 @@ def create_portfolio_allocation_manager(llm):
     def portfolio_allocation_manager_node(state) -> dict:
         analytics = state.get("portfolio_analytics")
         market_context = state.get("portfolio_market_context")
+        market_regime = state.get("market_regime")
         rebalance_proposal = state.get("rebalance_proposal")
         portfolio_risk_analysis = state.get("portfolio_risk_analysis", "")
         portfolio_rebalance_review = state.get("portfolio_rebalance_review", "")
@@ -136,6 +137,11 @@ Use the single-stock Portfolio Manager decisions and the aggressive/conservative
 **Portfolio-Wide Market Context**
 ```json
 {format_portfolio_payload(market_context)}
+```
+
+**Validated Market Regime and Allocation Overlay**
+```json
+{format_portfolio_payload(market_regime)}
 ```
 
 **Deterministic Portfolio Analytics**

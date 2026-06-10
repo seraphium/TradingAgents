@@ -15,6 +15,7 @@ def create_portfolio_risk_analyst(llm):
     def portfolio_risk_analyst_node(state) -> dict:
         analytics = state.get("portfolio_analytics")
         market_context = state.get("portfolio_market_context")
+        market_regime = state.get("market_regime")
         rebalance_proposal = state.get("rebalance_proposal")
         portfolio_request = state.get("portfolio_request")
         holdings = state.get("holdings", [])
@@ -38,6 +39,11 @@ Use the single-stock decisions and debate evidence to understand each holding's 
 **Portfolio-Wide Market Context**
 ```json
 {format_portfolio_payload(market_context)}
+```
+
+**Validated Market Regime and Allocation Overlay**
+```json
+{format_portfolio_payload(market_regime)}
 ```
 
 **Deterministic Portfolio Analytics**

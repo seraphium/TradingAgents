@@ -15,6 +15,7 @@ def create_portfolio_rebalancer(llm):
     def portfolio_rebalancer_node(state) -> dict:
         analytics = state.get("portfolio_analytics")
         market_context = state.get("portfolio_market_context")
+        market_regime = state.get("market_regime")
         rebalance_proposal = state.get("rebalance_proposal")
         portfolio_risk_analysis = state.get("portfolio_risk_analysis", "")
         holdings = state.get("holdings", [])
@@ -31,6 +32,11 @@ Use the supplied target weights and analytics as the numeric source of truth. Do
 **Portfolio-Wide Market Context**
 ```json
 {format_portfolio_payload(market_context)}
+```
+
+**Validated Market Regime and Allocation Overlay**
+```json
+{format_portfolio_payload(market_regime)}
 ```
 
 **Deterministic Portfolio Analytics**

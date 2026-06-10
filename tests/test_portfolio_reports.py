@@ -7,6 +7,7 @@ from tradingagents.portfolio import (
     AssetType,
     PortfolioInstrument,
     PortfolioMarketContext,
+    derive_market_regime,
     PortfolioPosition,
     PortfolioRequest,
     calculate_portfolio_analytics,
@@ -92,6 +93,10 @@ def portfolio_state() -> dict:
             benchmark_symbol="SPY",
             global_news="Broad market news.",
         ),
+        "market_regime": derive_market_regime(
+            PortfolioMarketContext(benchmark_symbol="SPY"),
+            benchmark_prices=[100 + index for index in range(220)],
+        ),
         "rebalance_proposal": proposal,
         "portfolio_risk_analysis": "Risk analysis.",
         "portfolio_rebalance_review": "Rebalance review.",
@@ -130,6 +135,7 @@ def test_render_complete_portfolio_report_assembles_all_sections():
     assert "## Holdings" in markdown
     assert "## Deterministic Portfolio Analytics" in markdown
     assert "## Portfolio-Wide Market Context" in markdown
+    assert "## Validated Market Regime and Allocation Implications" in markdown
     assert "## Deterministic Rebalance Proposal" in markdown
     assert "## Portfolio Risk Analysis" in markdown
     assert "## Portfolio Rebalance Review" in markdown
@@ -150,6 +156,7 @@ def test_save_portfolio_report_to_disk_writes_phase_10_shape(tmp_path):
     assert (paths.holdings_dir / "CASH.md").exists()
     assert paths.analytics_json and paths.analytics_json.exists()
     assert paths.market_context_json and paths.market_context_json.exists()
+    assert paths.market_regime_json and paths.market_regime_json.exists()
     assert paths.rebalance_json and paths.rebalance_json.exists()
     assert paths.rebalance_markdown and paths.rebalance_markdown.exists()
     assert paths.risk_markdown and paths.risk_markdown.exists()
@@ -160,4 +167,6 @@ def test_save_portfolio_report_to_disk_writes_phase_10_shape(tmp_path):
     market_context = json.loads(paths.market_context_json.read_text(encoding="utf-8"))
     assert analytics["weights_by_symbol"]["MSFT"] == pytest.approx(0.20)
     assert market_context["benchmark_symbol"] == "SPY"
-    assert "Final Portfolio Decision" in paths.complete_report.read_text(encoding="utf-8")
+    assert "Final Portfolio Decision" in paths.complete_report.read_text(
+        encoding="utf-8"
+    )
