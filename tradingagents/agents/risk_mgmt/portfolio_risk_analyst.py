@@ -1,4 +1,4 @@
-"""Portfolio-level risk analyst node."""
+"""Portfolio-level risk controller node."""
 
 from __future__ import annotations
 
@@ -7,59 +7,74 @@ from tradingagents.agents.utils.portfolio_prompting import (
     format_holding_evidence,
     format_portfolio_payload,
 )
+from tradingagents.agents.utils.structured import bind_structured
+from tradingagents.portfolio.decision_protocol import (
+    RiskValidationResult,
+    ReviewDecision,
+    render_risk_validation,
+)
 
 
 def create_portfolio_risk_analyst(llm):
-    """Create an LLM node that critiques deterministic portfolio risk metrics."""
+    """Create an LLM node that validates a deterministic proposal without rewriting it."""
+
+    structured_llm = bind_structured(
+        llm, RiskValidationResult, "Portfolio Risk Controller"
+    )
 
     def portfolio_risk_analyst_node(state) -> dict:
-        analytics = state.get("portfolio_analytics")
-        market_context = state.get("portfolio_market_context")
-        market_regime = state.get("market_regime")
-        rebalance_proposal = state.get("rebalance_proposal")
-        portfolio_request = state.get("portfolio_request")
-        holdings = state.get("holdings", [])
+        proposal = state.get("rebalance_proposal")
+        prompt = f"""As the Portfolio Risk Controller, validate the deterministic proposal using only the supplied deterministic metrics and evidence.
 
-        prompt = f"""As the Portfolio Risk Analyst, assess portfolio-level risk using only the supplied deterministic metrics.
-
-Do not invent missing volatility, beta, correlation, liquidity, Greek, or concentration numbers. If a metric is absent, say it is unavailable and explain the implication.
-
-Use the single-stock decisions and debate evidence to understand each holding's conviction and risk disagreements. Do not re-run the single-stock debate and do not write a separate rebalance reason for each stock. Aggregate the conclusions into portfolio-level risk controls such as reducing an over-concentrated sector, industry, or theme exposure; lowering total volatility; controlling correlation; preserving cash; and limiting option exposure.
+Return a structured approve/reject result referencing proposal_id `{proposal.proposal_id}` and proposal_version `{proposal.version}`. Do not invent or return replacement weights. Reject when a material risk or constraint violation makes this proposal unsafe.
 
 **Portfolio Request**
 ```json
-{format_portfolio_payload(portfolio_request)}
+{format_portfolio_payload(state.get('portfolio_request'))}
 ```
-
 **Single-Stock Decision Evidence**
 ```json
-{format_holding_evidence(holdings)}
+{format_holding_evidence(state.get('holdings', []))}
 ```
-
 **Portfolio-Wide Market Context**
 ```json
-{format_portfolio_payload(market_context)}
+{format_portfolio_payload(state.get('portfolio_market_context'))}
 ```
-
 **Validated Market Regime and Allocation Overlay**
 ```json
-{format_portfolio_payload(market_regime)}
+{format_portfolio_payload(state.get('market_regime'))}
 ```
-
 **Deterministic Portfolio Analytics**
 ```json
-{format_portfolio_payload(analytics)}
+{format_portfolio_payload(state.get('portfolio_analytics'))}
 ```
-
 **Deterministic Rebalance Proposal**
 ```json
-{format_portfolio_payload(rebalance_proposal)}
+{format_portfolio_payload(proposal)}
 ```
-
-Use the portfolio-wide market context for broad US market, macro, benchmark, sentiment, and fundamental backdrop. Focus on allocation concentration, correlation, volatility, beta, cash, option exposure, aggregate Greeks, and constraint flags. End with practical risk controls for the portfolio-level manager.{get_language_instruction()}"""
-
-        response = llm.invoke(prompt)
-        risk_analysis = response.content
-        return {"portfolio_risk_analysis": risk_analysis}
+Use only supplied deterministic metrics. Do not invent missing volatility, beta, correlation, liquidity, Greek, or concentration numbers.{get_language_instruction()}"""
+        try:
+            result = (
+                structured_llm.invoke(prompt) if structured_llm is not None else None
+            )
+            if not isinstance(result, RiskValidationResult):
+                raise TypeError("risk controller did not return RiskValidationResult")
+            if (
+                result.proposal_id != proposal.proposal_id
+                or result.proposal_version != proposal.version
+            ):
+                raise ValueError("risk validation references a different proposal")
+            markdown = render_risk_validation(result)
+        except Exception as exc:
+            response = llm.invoke(prompt)
+            markdown = response.content
+            result = RiskValidationResult(
+                proposal_id=proposal.proposal_id,
+                proposal_version=proposal.version,
+                decision=ReviewDecision.REJECT,
+                summary="Risk validation output could not be verified.",
+                violations=[str(exc)],
+            )
+        return {"risk_validation_result": result, "portfolio_risk_analysis": markdown}
 
     return portfolio_risk_analyst_node

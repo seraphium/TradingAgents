@@ -8,6 +8,8 @@ explain this proposal later, but the numeric proposal itself is deterministic.
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
+from hashlib import sha256
+import json
 from math import isfinite
 import re
 from typing import TYPE_CHECKING, Any, Literal, Mapping
@@ -51,8 +53,11 @@ class RebalanceComponent:
 
 @dataclass(frozen=True)
 class RebalanceProposal:
-    """A deterministic portfolio-level target allocation proposal."""
+    """A versioned deterministic portfolio-level target allocation proposal."""
 
+    proposal_id: str
+    version: int
+    input_hash: str
     portfolio_action: str
     component_proposals: list[RebalanceComponent]
     target_weights_by_symbol: dict[str, float]
@@ -79,6 +84,7 @@ def generate_rebalance_proposal(
     optimizer: Literal["heuristic", "mean_variance"] | None = None,
     score_step: float = 0.05,
     change_tolerance: float = 0.005,
+    proposal_version: int = 1,
 ) -> RebalanceProposal:
     """Generate deterministic target weights and action labels.
 
@@ -260,7 +266,26 @@ def generate_rebalance_proposal(
         portfolio_request,
     )
 
+    if proposal_version < 1:
+        raise ValueError("proposal_version must be at least 1")
+    input_hash = _proposal_input_hash(
+        portfolio_request,
+        analytics,
+        ratings,
+        structured_proposals,
+        data_quality,
+        market_regime,
+        sector_by_symbol,
+        liquidity,
+        holdings,
+        optimizer_mode,
+        score_step,
+        change_tolerance,
+    )
     return RebalanceProposal(
+        proposal_id=f"rp-{input_hash[:16]}-v{proposal_version}",
+        version=proposal_version,
+        input_hash=input_hash,
         portfolio_action=portfolio_action,
         component_proposals=components,
         target_weights_by_symbol=target_weights_by_symbol,
@@ -1702,3 +1727,30 @@ def _is_number(value: Any) -> bool:
     except (TypeError, ValueError):
         return False
     return isfinite(numeric)
+
+
+def _proposal_input_hash(*values: Any) -> str:
+    """Return a stable hash of the inputs that produced a proposal."""
+
+    def normalize(value: Any) -> Any:
+        if value is None or isinstance(value, (str, int, float, bool)):
+            return value
+        if hasattr(value, "model_dump"):
+            return normalize(value.model_dump(mode="json"))
+        if hasattr(value, "to_dict"):
+            return normalize(value.to_dict())
+        if hasattr(value, "__dataclass_fields__"):
+            return normalize(asdict(value))
+        if isinstance(value, Mapping):
+            return {
+                str(key): normalize(item)
+                for key, item in sorted(value.items(), key=lambda pair: str(pair[0]))
+            }
+        if isinstance(value, (list, tuple, set)):
+            return [normalize(item) for item in value]
+        return str(value)
+
+    payload = json.dumps(
+        normalize(values), sort_keys=True, separators=(",", ":"), default=str
+    )
+    return sha256(payload.encode("utf-8")).hexdigest()
