@@ -23,6 +23,16 @@ from tradingagents.portfolio.analytics import (
     calculate_portfolio_analytics,
     portfolio_analytics_to_dict,
 )
+from tradingagents.portfolio.data_quality import (
+    DataQualityAssessment,
+    DataQualityPolicy,
+    assess_data_quality,
+)
+from tradingagents.portfolio.instrument_proposals import (
+    InstrumentProposal,
+    ProposalSource,
+    extract_instrument_proposals,
+)
 from tradingagents.portfolio.data_inputs import (
     PortfolioAnalyticsInputs,
     collect_portfolio_analytics_inputs,
@@ -64,6 +74,10 @@ __all__ = [
     "PortfolioPosition",
     "PortfolioRequest",
     "ConstraintFlag",
+    "DataQualityAssessment",
+    "DataQualityPolicy",
+    "InstrumentProposal",
+    "ProposalSource",
     "OptionGreeks",
     "PortfolioAnalytics",
     "PortfolioAnalyticsInputs",
@@ -74,11 +88,13 @@ __all__ = [
     "PortfolioReportPaths",
     "PortfolioWorkflowEvent",
     "PortfolioWorkflowState",
+    "assess_data_quality",
     "calculate_portfolio_analytics",
     "collect_portfolio_analytics_inputs",
     "collect_portfolio_market_context",
     "default_portfolio_report_dir",
     "extract_holding_evidence_from_portfolio_result",
+    "extract_instrument_proposals",
     "extract_portfolio_allocation_summary",
     "extract_ratings_from_portfolio_result",
     "generate_rebalance_proposal",

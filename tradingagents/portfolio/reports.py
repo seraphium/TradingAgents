@@ -27,6 +27,8 @@ class PortfolioReportPaths:
     portfolio_dir: Path
     analytics_json: Path | None = None
     market_context_json: Path | None = None
+    data_quality_json: Path | None = None
+    instrument_proposals_json: Path | None = None
     rebalance_json: Path | None = None
     rebalance_markdown: Path | None = None
     risk_markdown: Path | None = None
@@ -82,6 +84,31 @@ def save_portfolio_report_to_disk(
             encoding="utf-8",
         )
 
+    instrument_proposals_json = None
+    instrument_proposals = portfolio_state.get("instrument_proposals")
+    if instrument_proposals is not None:
+        instrument_proposals_json = portfolio_dir / "instrument_proposals.json"
+        instrument_proposals_json.write_text(
+            json.dumps(
+                {
+                    symbol: _json_payload(proposal)
+                    for symbol, proposal in instrument_proposals.items()
+                },
+                indent=2,
+                default=str,
+            ),
+            encoding="utf-8",
+        )
+
+    data_quality_json = None
+    data_quality = portfolio_state.get("data_quality_assessment")
+    if data_quality is not None:
+        data_quality_json = portfolio_dir / "data_quality.json"
+        data_quality_json.write_text(
+            json.dumps(_json_payload(data_quality), indent=2, default=str),
+            encoding="utf-8",
+        )
+
     rebalance_json = None
     rebalance_markdown = None
     proposal = portfolio_state.get("rebalance_proposal")
@@ -131,6 +158,8 @@ def save_portfolio_report_to_disk(
         portfolio_dir=portfolio_dir,
         analytics_json=analytics_json,
         market_context_json=market_context_json,
+        data_quality_json=data_quality_json,
+        instrument_proposals_json=instrument_proposals_json,
         rebalance_json=rebalance_json,
         rebalance_markdown=rebalance_markdown,
         risk_markdown=risk_markdown,
@@ -198,6 +227,28 @@ def render_complete_portfolio_report(portfolio_state: dict[str, Any]) -> str:
             f"({holding.get('analysis_status')})"
         )
 
+    data_quality = portfolio_state.get("data_quality_assessment")
+    if data_quality is not None:
+        sections.extend(
+            [
+                "",
+                "## Data Quality",
+                f"- Status: {data_quality.status}",
+                f"- Weighted analysis coverage: {data_quality.weighted_analysis_coverage:.2%}",
+                "- Metric coverage: "
+                + ", ".join(
+                    f"{name} {coverage:.2%}"
+                    for name, coverage in data_quality.metric_coverage.items()
+                ),
+            ]
+        )
+        for restriction in data_quality.restrictions:
+            sections.append(f"- Restriction: {restriction}")
+        for issue in getattr(data_quality, "blocking_issues", []):
+            sections.append(f"- Blocking issue: {issue}")
+        for warning in getattr(data_quality, "warnings", []):
+            sections.append(f"- Warning: {warning}")
+
     if portfolio_state.get("portfolio_analytics"):
         sections.extend(
             [
@@ -255,6 +306,8 @@ def render_complete_portfolio_report(portfolio_state: dict[str, Any]) -> str:
 
 
 def _json_payload(value: Any) -> Any:
+    if hasattr(value, "model_dump") and callable(value.model_dump):
+        return value.model_dump(mode="json")
     if hasattr(value, "to_dict") and callable(value.to_dict):
         return value.to_dict()
     return value

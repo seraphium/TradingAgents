@@ -23,9 +23,18 @@ from tradingagents.portfolio.analytics import (
     PortfolioAnalytics,
     calculate_portfolio_analytics,
 )
+from tradingagents.portfolio.data_quality import (
+    DataQualityAssessment,
+    DataQualityPolicy,
+    assess_data_quality,
+)
 from tradingagents.portfolio.data_inputs import (
     PortfolioAnalyticsInputs,
     collect_portfolio_analytics_inputs,
+)
+from tradingagents.portfolio.instrument_proposals import (
+    InstrumentProposal,
+    extract_instrument_proposals,
 )
 from tradingagents.portfolio.market_context import (
     PortfolioMarketContext,
@@ -67,6 +76,8 @@ class PortfolioWorkflowState(TypedDict, total=False):
     portfolio_analytics: PortfolioAnalytics
     portfolio_market_context: PortfolioMarketContext
     ratings_by_symbol: dict[str, str]
+    instrument_proposals: dict[str, InstrumentProposal]
+    data_quality_assessment: DataQualityAssessment
     rebalance_proposal: RebalanceProposal
     portfolio_risk_analysis: str
     portfolio_rebalance_review: str
@@ -181,13 +192,26 @@ def run_portfolio_workflow(
 
     emit("stage_started", STAGE_DETERMINISTIC_REBALANCE)
     ratings = extract_ratings_from_portfolio_result(portfolio_result)
+    instrument_proposals = extract_instrument_proposals(portfolio_result)
+    holding_evidence = extract_holding_evidence_from_portfolio_result(portfolio_result)
+    data_quality = assess_data_quality(
+        request,
+        analytics,
+        holding_evidence,
+        instrument_proposals,
+        policy=DataQualityPolicy.from_config(config),
+    )
     proposal = generate_rebalance_proposal(
         request,
         analytics,
         ratings_by_symbol=ratings,
-        holdings=extract_holding_evidence_from_portfolio_result(portfolio_result),
+        instrument_proposals=instrument_proposals,
+        data_quality=data_quality,
+        holdings=holding_evidence,
     )
     state["ratings_by_symbol"] = ratings
+    state["instrument_proposals"] = instrument_proposals
+    state["data_quality_assessment"] = data_quality
     state["rebalance_proposal"] = proposal
     emit("stage_completed", STAGE_DETERMINISTIC_REBALANCE)
 
