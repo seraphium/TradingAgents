@@ -61,6 +61,12 @@ from tradingagents.portfolio.rebalancing import (
     rebalance_proposal_to_dict,
     render_rebalance_proposal,
 )
+from tradingagents.portfolio.risk_review import (
+    ConstraintAdjustmentRequest,
+    ValidatedConstraintAdjustment,
+    extract_constraint_adjustment_request,
+    validate_constraint_adjustment_requests,
+)
 from tradingagents.portfolio.workflow import (
     PortfolioWorkflowEvent,
     PortfolioWorkflowState,
@@ -83,6 +89,8 @@ __all__ = [
     "PortfolioPosition",
     "PortfolioRequest",
     "ConstraintFlag",
+    "ConstraintAdjustmentRequest",
+    "ValidatedConstraintAdjustment",
     "DataQualityAssessment",
     "DataQualityPolicy",
     "InstrumentProposal",
@@ -109,6 +117,7 @@ __all__ = [
     "derive_benchmark_trend_features",
     "derive_market_regime",
     "default_portfolio_report_dir",
+    "extract_constraint_adjustment_request",
     "extract_holding_evidence_from_portfolio_result",
     "extract_instrument_proposals",
     "extract_portfolio_allocation_summary",
@@ -125,5 +134,6 @@ __all__ = [
     "render_holding_report",
     "render_rebalance_proposal",
     "run_portfolio_workflow",
+    "validate_constraint_adjustment_requests",
     "save_portfolio_report_to_disk",
 ]

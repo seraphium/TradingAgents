@@ -56,7 +56,7 @@ Use the single-stock decisions and debate evidence to understand each holding's 
 {format_portfolio_payload(rebalance_proposal)}
 ```
 
-Use the portfolio-wide market context for broad US market, macro, benchmark, sentiment, and fundamental backdrop. Focus on allocation concentration, correlation, volatility, beta, cash, option exposure, aggregate Greeks, and constraint flags. End with practical risk controls for the portfolio-level manager.{get_language_instruction()}"""
+Use the portfolio-wide market context for broad US market, macro, benchmark, sentiment, and fundamental backdrop. Focus on allocation concentration, correlation, volatility, beta, cash, option exposure, aggregate Greeks, and constraint flags. End with practical risk controls for the portfolio-level manager. If a deterministic rerun is necessary, optionally append one fenced JSON object with a `constraint_adjustments` object containing a reason and only tighter `min_cash_weight`, `max_single_position_weight`, or `max_options_weight` values. Adjustments are capped and validated; never propose target weights.{get_language_instruction()}"""
 
         response = llm.invoke(prompt)
         risk_analysis = response.content

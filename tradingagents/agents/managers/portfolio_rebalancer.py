@@ -52,7 +52,7 @@ Use the supplied target weights and analytics as the numeric source of truth. Do
 **Portfolio Risk Analyst Notes**
 {portfolio_risk_analysis}
 
-Return a concise Markdown rebalance review with a high-level portfolio thesis, portfolio-level tradeoffs, and any objections the final manager should consider. Incorporate the broad market/news/sentiment/fundamental backdrop when it materially changes the risk budget or sector/theme exposure. Avoid writing a separate rebalance reason for each stock unless a component creates a portfolio-level exception.{get_language_instruction()}"""
+Return a concise Markdown rebalance review with a high-level portfolio thesis, portfolio-level tradeoffs, and any objections the final manager should consider. Incorporate the broad market/news/sentiment/fundamental backdrop when it materially changes the risk budget or sector/theme exposure. Avoid writing a separate rebalance reason for each stock unless a component creates a portfolio-level exception. If a deterministic rerun is necessary, optionally append one fenced JSON object with a `constraint_adjustments` object containing a reason and only tighter `min_cash_weight`, `max_single_position_weight`, or `max_options_weight` values. Adjustments are capped and validated; never propose target weights.{get_language_instruction()}"""
 
         response = llm.invoke(prompt)
         rebalance_review = response.content
