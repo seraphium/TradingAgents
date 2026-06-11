@@ -4,6 +4,10 @@ import tradingagents.default_config as default_config
 from tradingagents.dataflows.config import set_config
 from tradingagents.portfolio import (
     AssetType,
+    BenchmarkTrendFeatures,
+    MarketOverlay,
+    MarketRegime,
+    MarketRegimeLabel,
     PortfolioConstraints,
     PortfolioInstrument,
     PortfolioPosition,
@@ -394,6 +398,108 @@ def test_rebalance_reason_uses_portfolio_level_sector_and_theme_context():
     assert "Semiconductors 60.00%" in markdown
     assert "chip-related 60.00%" in markdown
     assert "Aggregate single-stock signals" in markdown
+
+
+@pytest.mark.unit
+def test_component_rationale_combines_holding_portfolio_and_market_evidence():
+    request = PortfolioRequest(
+        positions=[
+            stock_position("AAPL", 0.60),
+            cash_position(0.40),
+        ],
+        trade_date="2026-05-27",
+        constraints=PortfolioConstraints(
+            custom={
+                "max_underlying_exposure": 0.40,
+                "max_sector_exposure": 0.45,
+            }
+        ),
+    )
+    analytics = calculate_portfolio_analytics(
+        request,
+        historical_prices={"AAPL": [100, 110, 90, 80, 70]},
+        sector_by_symbol={"AAPL": "Technology"},
+    )
+    regime = MarketRegime(
+        label=MarketRegimeLabel.RISK_OFF,
+        confidence=0.90,
+        benchmark_symbol="SPY",
+        benchmark_trend=BenchmarkTrendFeatures(
+            observations=100,
+            trend_score=-0.60,
+        ),
+        news_sentiment_score=-0.75,
+        summary="Risk-off market regime with 90% confidence.",
+        allocation_implications=["Increase cash target by up to 3.00%."],
+        overlay=MarketOverlay(
+            risk_adjustment=-0.60,
+            cash_weight_adjustment=0.03,
+        ),
+        evidence=["Recent market/news directional score -0.75."],
+    )
+
+    proposal = generate_rebalance_proposal(
+        request,
+        analytics,
+        ratings_by_symbol={"AAPL": "Underweight"},
+        holdings=[
+            {
+                "symbol": "AAPL",
+                "analysis_status": "analyzed",
+                "analysis": {
+                    "final_trade_decision": (
+                        "**Rating**: Underweight\n\n"
+                        "AAPL momentum is weak and earnings expectations are deteriorating."
+                    )
+                },
+            }
+        ],
+        market_regime=regime,
+        sector_by_symbol={"AAPL": "Technology"},
+    )
+
+    aapl = next(
+        component for component in proposal.component_proposals if component.symbol == "AAPL"
+    )
+    assert aapl.action == "Trim"
+    assert "Holding view: Single-stock final conclusion: AAPL momentum is weak" in aapl.rationale
+    assert "Portfolio evidence:" in aapl.rationale
+    assert "portfolio risk" in aapl.rationale
+    assert "Combined AAPL exposure is 60.0%" in aapl.rationale
+    assert "Technology exposure is 60.0%, above the 45.0% portfolio threshold" in aapl.rationale
+    assert "Market evidence: Risk-off market regime with 90% confidence" in aapl.rationale
+    assert "Allocation logic: Trim because" in aapl.rationale
+    assert "market-regime allocation adjustment" in aapl.rationale
+    assert "Instrument proposal rating" not in aapl.rationale
+
+
+@pytest.mark.unit
+def test_cash_rationale_explains_reserve_and_market_evidence():
+    request = PortfolioRequest(
+        positions=[stock_position("AAPL", 0.60), cash_position(0.40)],
+        trade_date="2026-05-27",
+    )
+    regime = MarketRegime(
+        label=MarketRegimeLabel.RISK_OFF,
+        confidence=1.0,
+        summary="Risk-off market regime with 100% confidence.",
+        allocation_implications=["Increase cash target by up to 5.00%."],
+        overlay=MarketOverlay(risk_adjustment=-1.0, cash_weight_adjustment=0.05),
+    )
+
+    proposal = generate_rebalance_proposal(
+        request,
+        calculate_portfolio_analytics(request),
+        ratings_by_symbol={"AAPL": "Hold"},
+        market_regime=regime,
+    )
+
+    cash = next(
+        component for component in proposal.component_proposals if component.symbol == "CASH"
+    )
+    assert "Holding view: Cash is the portfolio liquidity and drawdown reserve." in cash.rationale
+    assert "Market evidence: Risk-off market regime with 100% confidence." in cash.rationale
+    assert "Increase cash target by up to 5.00%." in cash.rationale
 
 
 @pytest.mark.unit

@@ -202,34 +202,27 @@ def generate_rebalance_proposal(
             if symbol in structured_proposals
             else _rating_for_symbol(symbol, ratings)
         )
-        if position.instrument.asset_type == AssetType.CASH:
-            rationale_parts = [
-                "Cash sleeve is treated as portfolio funding and liquidity reserve."
-            ]
-        else:
-            rationale_parts = [
-                f"Instrument proposal rating {rating} contributes confidence-weighted optimizer score {scores[symbol]:+.2f}."
-            ]
-        if optimizer_mode == "mean_variance":
-            rationale_parts.append("Target set by mean-variance optimizer.")
-        if risk_adjustments.get(symbol):
-            rationale_parts.append(f"Risk adjustment {risk_adjustments[symbol]:+.2f}.")
-        if (
-            "market_regime_overlay" in constraints_applied[symbol]
-            and market_regime is not None
-        ):
-            rationale_parts.append(
-                f"Validated {market_regime.label.value} market overlay applied."
-            )
-        if constraints_applied[symbol]:
-            rationale_parts.append(
-                "Applied constraints: " + ", ".join(constraints_applied[symbol]) + "."
-            )
         single_stock_summary = _single_stock_summary(
             symbol,
             position.instrument.asset_type,
             rating,
             holding_evidence,
+        )
+        rationale = _component_rationale(
+            symbol=symbol,
+            position=position,
+            action=action,
+            rating=rating,
+            score=scores[symbol],
+            single_stock_summary=single_stock_summary,
+            analytics=analytics,
+            portfolio_request=portfolio_request,
+            risk_notes=risk_notes,
+            risk_adjustment=risk_adjustments.get(symbol, 0.0),
+            market_regime=market_regime,
+            sector_by_symbol=sector_by_symbol or {},
+            optimizer_mode=optimizer_mode,
+            constraints_applied=constraints_applied[symbol],
         )
         components.append(
             RebalanceComponent(
@@ -241,7 +234,7 @@ def generate_rebalance_proposal(
                 action=action,
                 rating=rating,
                 score=scores[symbol],
-                rationale=" ".join(rationale_parts),
+                rationale=rationale,
                 single_stock_summary=single_stock_summary,
                 constraints_applied=constraints_applied[symbol],
             )
@@ -512,6 +505,168 @@ def _truncate_text(value: Any, limit: int = 360) -> str:
     if len(text) <= limit:
         return text
     return text[: max(limit - 15, 0)].rstrip() + "... [truncated]"
+
+
+def _component_rationale(
+    *,
+    symbol: str,
+    position: Any,
+    action: str,
+    rating: str,
+    score: float,
+    single_stock_summary: str,
+    analytics: PortfolioAnalytics,
+    portfolio_request: PortfolioRequest,
+    risk_notes: list[str],
+    risk_adjustment: float,
+    market_regime: "MarketRegime" | None,
+    sector_by_symbol: Mapping[str, str],
+    optimizer_mode: str,
+    constraints_applied: list[str],
+) -> str:
+    """Explain a component target using holding, portfolio, and market evidence."""
+
+    if position.instrument.asset_type == AssetType.CASH:
+        holding_view = "Cash is the portfolio liquidity and drawdown reserve."
+    else:
+        holding_view = _truncate_text(single_stock_summary, limit=240)
+
+    portfolio_evidence = _component_portfolio_evidence(
+        symbol,
+        position,
+        analytics,
+        portfolio_request,
+        risk_notes,
+        sector_by_symbol,
+    )
+    market_evidence = _component_market_evidence(market_regime)
+    allocation_logic = _component_allocation_logic(
+        action=action,
+        rating=rating,
+        score=score,
+        risk_adjustment=risk_adjustment,
+        optimizer_mode=optimizer_mode,
+        constraints_applied=constraints_applied,
+    )
+
+    sections = [f"Holding view: {holding_view}"]
+    if portfolio_evidence:
+        sections.append("Portfolio evidence: " + " ".join(portfolio_evidence))
+    if market_evidence:
+        sections.append("Market evidence: " + " ".join(market_evidence))
+    sections.append(f"Allocation logic: {allocation_logic}")
+    return " ".join(sections)
+
+
+def _component_portfolio_evidence(
+    symbol: str,
+    position: Any,
+    analytics: PortfolioAnalytics,
+    portfolio_request: PortfolioRequest,
+    risk_notes: list[str],
+    sector_by_symbol: Mapping[str, str],
+) -> list[str]:
+    evidence: list[str] = []
+    contribution = analytics.risk_contribution_by_symbol.get(symbol)
+    if _is_number(contribution):
+        evidence.append(f"It contributes {contribution:.1%} of portfolio risk.")
+
+    volatility = analytics.volatility_by_symbol.get(symbol)
+    if _is_number(volatility):
+        evidence.append(f"Annualized volatility is {volatility:.1%}.")
+
+    instrument = position.instrument
+    underlying = (
+        instrument.underlying
+        if instrument.asset_type == AssetType.OPTION
+        else instrument.symbol
+    )
+    underlying_exposure = analytics.underlying_exposure.get(underlying)
+    concentration_limit = _positive_float(
+        portfolio_request.constraints.custom.get("max_underlying_exposure"),
+        default=0.40,
+    )
+    if _is_number(underlying_exposure) and underlying_exposure >= concentration_limit:
+        evidence.append(
+            f"Combined {underlying} exposure is {underlying_exposure:.1%}, at or above the "
+            f"{concentration_limit:.1%} concentration threshold."
+        )
+
+    lookup_symbol = _classification_lookup_symbol(position)
+    sector = sector_by_symbol.get(lookup_symbol) or sector_by_symbol.get(symbol)
+    sector_exposure = analytics.sector_exposure.get(sector) if sector else None
+    sector_limit = _positive_float(
+        portfolio_request.constraints.custom.get("max_sector_exposure"),
+        default=0.45,
+    )
+    if sector and _is_number(sector_exposure):
+        evidence.append(
+            f"{sector} exposure is {sector_exposure:.1%}"
+            + (
+                f", above the {sector_limit:.1%} portfolio threshold."
+                if sector_exposure > sector_limit
+                else "."
+            )
+        )
+
+    symbol_notes = [note for note in risk_notes if symbol.lower() in note.lower()]
+    if symbol_notes:
+        evidence.append(_truncate_text(" ".join(symbol_notes), limit=180))
+    return evidence
+
+
+def _component_market_evidence(market_regime: "MarketRegime" | None) -> list[str]:
+    if market_regime is None:
+        return []
+    evidence = [market_regime.summary]
+    evidence.extend(market_regime.evidence[:2])
+    evidence.extend(market_regime.allocation_implications[:1])
+    return evidence
+
+
+def _component_allocation_logic(
+    *,
+    action: str,
+    rating: str,
+    score: float,
+    risk_adjustment: float,
+    optimizer_mode: str,
+    constraints_applied: list[str],
+) -> str:
+    if action == "Trim":
+        result = "Trim because the combined evidence supports reducing exposure."
+    elif action == "Add":
+        result = "Add because the combined evidence supports increasing exposure."
+    elif action == "Sell":
+        result = "Sell because the combined evidence no longer supports the position."
+    elif action == "Buy":
+        result = "Buy because the combined evidence supports initiating exposure."
+    else:
+        result = "Hold because the combined evidence does not justify a material weight change."
+
+    details = [f"The holding rating is {rating} with allocation score {score:+.2f}."]
+    if risk_adjustment:
+        details.append(f"Portfolio risk reduces its allocation score by {abs(risk_adjustment):.2f}.")
+    if optimizer_mode == "mean_variance":
+        details.append("The target also reflects the mean-variance optimizer.")
+    if constraints_applied:
+        details.append(
+            "Controls applied: "
+            + ", ".join(_humanize_constraint(name) for name in constraints_applied)
+            + "."
+        )
+    return " ".join([result, *details])
+
+
+def _humanize_constraint(name: str) -> str:
+    return {
+        "component_bounds": "position weight bounds",
+        "data_quality_no_increase": "no increase without sufficient evidence",
+        "market_regime_overlay": "market-regime allocation adjustment",
+        "max_options_weight": "maximum options exposure",
+        "mean_variance_optimizer": "mean-variance target",
+        "risk_budget": "portfolio volatility budget",
+    }.get(name, name.replace("_", " "))
 
 
 def _component_bounds(
